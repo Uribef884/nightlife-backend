@@ -7,6 +7,9 @@ import {
   OneToMany,
 } from "typeorm";
 import { Ticket } from "./Ticket";
+import { ManyToOne } from "typeorm";
+import { User } from "./User";
+
 
 @Entity()
 export class Club {
@@ -58,6 +61,12 @@ export class Club {
   @Column()
   profileImageBlurhash!: string;
 
+  @ManyToOne(() => User)
+  owner!: User;
+  
+  @Column()
+  ownerId!: string;
+  
   @CreateDateColumn()
   createdAt!: Date;
 

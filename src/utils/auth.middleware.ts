@@ -1,14 +1,30 @@
 import { Request, Response, NextFunction } from "express";
 
-const API_KEY = process.env.ADMIN_API_KEY;
+export const requireClubOwnerOrAdmin = (req: Request, res: Response, next: NextFunction): void => {
+  // @ts-ignore — injected in authMiddleware
+  const user = req.user;
 
-export function requireAdminAuth(req: Request, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || authHeader !== `Bearer ${API_KEY}`) {
-    res.status(403).json({ error: "Unauthorized" });
-    return; 
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
   }
 
-  next(); 
-}
+  if (user.role === "admin" || user.role === "clubowner") {
+    next();
+    return;
+  }
+
+  res.status(403).json({ error: "Forbidden: You are not authorized" });
+};
+
+export const requireAdminAuth = (req: Request, res: Response, next: NextFunction): void => {
+  // @ts-ignore
+  const user = req.user;
+
+  if (!user || user.role !== "admin") {
+    res.status(403).json({ error: "Forbidden: Admins only" });
+    return;
+  }
+
+  next();
+};

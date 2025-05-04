@@ -1,15 +1,17 @@
-import { Request, Response } from "express";
+import { Response } from "express";
+// @ts-ignore
+import { AuthenticatedRequest } from "../middlewares/authMiddleware";
 import { AppDataSource } from "../config/data-source";
 import { TicketPurchase } from "../entities/TicketPurchase";
 import { Club } from "../entities/Club";
 
-export const getClubOrders = async (req: Request, res: Response) => {
+export const getClubOrders = async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
   const clubRepo = AppDataSource.getRepository(Club);
   const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
 
   const club = await clubRepo.findOne({
-    where: { owner: { id: userId } },
+    where: { ownerId: userId },
     relations: ["tickets"],
   });
 
@@ -26,7 +28,7 @@ export const getClubOrders = async (req: Request, res: Response) => {
   res.json(orders);
 };
 
-export const getClubOrderById = async (req: Request, res: Response) => {
+export const getClubOrderById = async (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user?.id;
   const orderId = req.params.id;
 
@@ -34,7 +36,7 @@ export const getClubOrderById = async (req: Request, res: Response) => {
   const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
 
   const club = await clubRepo.findOne({
-    where: { owner: { id: userId } },
+    where: { ownerId: userId },
     relations: ["tickets"],
   });
 
