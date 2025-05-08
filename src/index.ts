@@ -9,11 +9,15 @@ import ticketRoutes from "./routes/ticket.routes";
 import authRoutes from "./routes/auth.routes";
 import cookieParser from "cookie-parser";
 import orderRoutes from "./routes/order.routes";
+import { authMiddleware } from "./middlewares/authMiddleware";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+app.use(cookieParser()); // ✅ make sure this comes before authMiddleware
+ // ✅ global middleware
+
 
 // Middleware
 app.use(cookieParser());
@@ -22,9 +26,10 @@ app.use(helmet());
 app.use(express.json());
 
 // Routes
+app.use("/auth", authRoutes);
+app.use(authMiddleware);
 app.use("/clubs", clubRoutes);
 app.use("/tickets", ticketRoutes);
-app.use("/auth", authRoutes);
 app.use("/orders", orderRoutes);
 
 // DB Connection + Server Start

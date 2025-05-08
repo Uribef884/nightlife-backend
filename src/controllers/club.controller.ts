@@ -1,10 +1,11 @@
 import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { Club } from "../entities/Club";
-import { ManyToOne } from "typeorm"; 
+import { User } from "../entities/User"; 
 
-export function createClub(req: Request, res: Response): void {
+export async function createClub(req: Request, res: Response): Promise<void> {
   const repo = AppDataSource.getRepository(Club);
+  const userRepo = AppDataSource.getRepository(User);
   const {
     name,
     description,
@@ -21,10 +22,17 @@ export function createClub(req: Request, res: Response): void {
     priority,
     profileImageUrl,
     profileImageBlurhash,
+    ownerId // ✅ NEW
   } = req.body;
 
-  if (!name || !description || !address || !location || !musicType || !openHours || !openDays || !profileImageUrl || !profileImageBlurhash) {
-    res.status(400).json({ error: "Missing required fields" });
+  if (!ownerId) {
+    res.status(400).json({ error: "Missing ownerId" });
+    return;
+  }
+
+  const owner = await userRepo.findOneBy({ id: ownerId });
+  if (!owner) {
+    res.status(404).json({ error: "Owner not found" });
     return;
   }
 
@@ -44,17 +52,17 @@ export function createClub(req: Request, res: Response): void {
     priority: Math.max(1, priority || 999),
     profileImageUrl,
     profileImageBlurhash,
+    owner,
+    ownerId
   });
 
-  repo
-    .save(club)
-    .then((saved) => res.status(201).json(saved))
-    .catch((err) => {
-      console.error("Error saving club:", err);
-      res.status(500).json({ error: "Internal server error" });
-    });
+  await repo.save(club);
+  res.status(201).json(club);
+  if (owner.role === "user") {
+    owner.role = "clubowner";
+    await userRepo.save(owner);
+  }
 }
-
 // UPDATE CLUB
 export async function updateClub(req: Request, res: Response): Promise<void> {
   try {

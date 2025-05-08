@@ -5,8 +5,9 @@ import { requireAuth } from "../middlewares/requireAuth";
 const router = Router();
 
 router.use(requireAuth);
-
+// @ts-ignore
 router.get("/", getClubOrders);
+// @ts-ignore
 router.get("/:id", getClubOrderById);
 
 export default router;
