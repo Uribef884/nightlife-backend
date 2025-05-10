@@ -1,16 +1,21 @@
 import { Router } from "express";
-import { createClub, getAllClubs, updateClub, deleteClub, getClubById } from "../controllers/club.controller";
-import { requireClubOwnerOrAdmin } from "../utils/auth.middleware";
-import { requireAdminAuth } from "../utils/auth.middleware"
+import {
+  createClub,
+  getAllClubs,
+  getClubById,
+  updateClub,
+  deleteClub
+} from "../controllers/club.controller";
+import { authMiddleware,  requireAdminAuth } from "../middlewares/authMiddleware";
+
 
 const router = Router();
 
-router.get("/", getAllClubs);  
-router.get("/:id", getClubById);
+router.get("/", getAllClubs);           // Public
+router.get("/:id", getClubById);        // Public
 
-router.post("/", requireAdminAuth, createClub);
-router.put("/:id", requireClubOwnerOrAdmin, updateClub);
-router.delete("/:id", requireClubOwnerOrAdmin, deleteClub);
-
+router.post("/", authMiddleware, requireAdminAuth, createClub);
+router.put("/:id", authMiddleware, updateClub);      // Protected
+router.delete("/:id", authMiddleware, deleteClub);   // Protected
 
 export default router;

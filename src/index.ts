@@ -27,11 +27,9 @@ app.use(express.json());
 
 // Routes
 app.use("/auth", authRoutes);
-app.use(authMiddleware);
 app.use("/clubs", clubRoutes);
-app.use("/tickets", ticketRoutes);
-app.use("/orders", orderRoutes);
-
+app.use("/tickets", ticketRoutes); // leave public access to GET endpoints
+app.use("/orders", authMiddleware, orderRoutes);
 // DB Connection + Server Start
 AppDataSource.initialize()
   .then(() => {

@@ -1,15 +1,26 @@
 import { Router } from "express";
-import { createTicket, getTicketsByClub, getAllTickets, getTicketById, updateTicket, deleteTicket, toggleTicketVisibility } from "../controllers/ticket.controller";
-import { requireAdminAuth } from "../utils/auth.middleware";
+import {
+  createTicket,
+  getTicketsByClub,
+  getAllTickets,
+  getTicketById,
+  updateTicket,
+  deleteTicket,
+  toggleTicketVisibility
+} from "../controllers/ticket.controller";
+import { authMiddleware, requireClubOwnerOrAdmin } from "../middlewares/authMiddleware";
 
 const router = Router();
 
-router.post("/", requireAdminAuth, createTicket); 
-router.get("/club/:id", getTicketsByClub);
+// ✅ Public access
 router.get("/", getAllTickets);
 router.get("/:id", getTicketById);
-router.put("/:id", requireAdminAuth, updateTicket); 
-router.delete("/:id", requireAdminAuth, deleteTicket);
-router.patch("/:id/hide", requireAdminAuth, toggleTicketVisibility);
+router.get("/club/:id", getTicketsByClub);
+
+// ✅ Authenticated + Role-protected
+router.post("/", authMiddleware, requireClubOwnerOrAdmin, createTicket);
+router.put("/:id", authMiddleware, requireClubOwnerOrAdmin, updateTicket);
+router.delete("/:id", authMiddleware, requireClubOwnerOrAdmin, deleteTicket);
+router.patch("/:id/hide", authMiddleware, requireClubOwnerOrAdmin, toggleTicketVisibility);
 
 export default router;
