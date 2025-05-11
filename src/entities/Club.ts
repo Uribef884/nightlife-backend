@@ -5,11 +5,10 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  ManyToOne,
 } from "typeorm";
 import { Ticket } from "./Ticket";
-import { ManyToOne } from "typeorm";
 import { User } from "./User";
-
 
 @Entity()
 export class Club {
@@ -63,16 +62,19 @@ export class Club {
 
   @ManyToOne(() => User)
   owner!: User;
-  
+
   @Column()
   ownerId!: string;
-  
+
+  @OneToMany(() => Ticket, (ticket) => ticket.club)
+  tickets!: Ticket[];
+
+  @OneToMany(() => User, (user) => user.club)
+  bouncers!: User[];
+
   @CreateDateColumn()
   createdAt!: Date;
 
   @UpdateDateColumn()
   updatedAt!: Date;
-
-  @OneToMany(() => Ticket, (ticket) => ticket.club)
-  tickets!: Ticket[];
 }

@@ -124,8 +124,6 @@ export async function deleteClub(req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
-    // ✅ Allow admins to delete any club
-    // ✅ Allow clubowners to delete only their own clubs
     const isAdmin = user?.role === "admin";
     const isOwner = user?.role === "clubowner" && club.ownerId === user.id;
 
@@ -135,7 +133,7 @@ export async function deleteClub(req: AuthenticatedRequest, res: Response): Prom
     }
 
     await repo.remove(club);
-    res.status(204).send();
+    res.status(200).json({ message: "Club deleted successfully" }); // 👈 changed from 204
   } catch (error) {
     console.error("❌ Error deleting club:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -155,18 +153,47 @@ export async function getAllClubs(req: Request, res: Response): Promise<void> {
   }
 }
 
-export async function getClubById(req: Request, res: Response): Promise<void> {
+export async function getClubById(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const clubRepo = AppDataSource.getRepository(Club);
-    const club = await clubRepo.findOneBy({ id });
+    const user = req.user;
+    const repo = AppDataSource.getRepository(Club);
+
+    const club = await repo.findOne({ where: { id }, relations: ["owner"] });
 
     if (!club) {
       res.status(404).json({ error: "Club not found" });
       return;
     }
 
-    res.status(200).json(club);
+    const isAdmin = user?.role === "admin";
+    const isOwner = user?.role === "clubowner" && user.id === club.ownerId;
+    const isBouncer = user?.role === "bouncer";
+    
+    if (isAdmin || isOwner) {
+      res.status(200).json(club); // return full object
+    } else {
+      // return partial data
+      const publicFields = {
+        id: club.id,
+        name: club.name,
+        description: club.description,
+        address: club.address,
+        location: club.location,
+        musicType: club.musicType,
+        instagram: club.instagram,
+        whatsapp: club.whatsapp,
+        openHours: club.openHours,
+        openDays: club.openDays,
+        dressCode: club.dressCode,
+        minimumAge: club.minimumAge,
+        extraInfo: club.extraInfo,
+        profileImageUrl: club.profileImageUrl,
+        profileImageBlurhash: club.profileImageBlurhash,
+        priority: club.priority,
+      };
+      res.status(200).json(publicFields);
+    }
   } catch (error) {
     console.error("❌ Error fetching club:", error);
     res.status(500).json({ error: "Internal server error" });

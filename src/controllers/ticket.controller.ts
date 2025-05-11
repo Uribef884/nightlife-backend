@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { Ticket } from "../entities/Ticket";
 import { Club } from "../entities/Club";
+import { AuthenticatedRequest } from "../types/express";
 
 export async function createTicket(req: Request, res: Response): Promise<void> {
   try {
@@ -110,25 +111,35 @@ export async function getTicketsByClub(req: Request, res: Response): Promise<voi
     }
   }
 
-  export async function getTicketById(req: Request, res: Response): Promise<void> {
-    try {
-      const repo = AppDataSource.getRepository(Ticket);
-      const ticket = await repo.findOne({
-        where: { id: req.params.id },
-        relations: ["club"],
-      });
-  
-      if (!ticket) {
-        res.status(404).json({ error: "Ticket not found" });
-        return;
-      }
-  
-      res.json(ticket);
-    } catch (error) {
-      console.error("❌ Error fetching ticket:", error);
-      res.status(500).json({ error: "Internal server error" });
+export async function getTicketById(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const ticketRepo = AppDataSource.getRepository(Ticket);
+    const { id } = req.params;
+    const user = req.user;
+
+    const ticket = await ticketRepo.findOne({
+      where: { id },
+      relations: ["club"],
+    });
+
+    if (!ticket) {
+      res.status(404).json({ error: "Ticket not found" });
+      return;
     }
+
+    // ⛔ Restrict clubowners from accessing others' tickets
+    if (user?.role === "clubowner" && ticket.club.ownerId !== user.id) {
+      res.status(403).json({ error: "Forbidden: This ticket doesn't belong to your club" });
+      return;
+    }
+
+    res.status(200).json(ticket);
+  } catch (error) {
+    console.error("❌ Error fetching ticket by ID:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
+}
+
 
 export async function deleteTicket(req: Request, res: Response): Promise<void> {
   try {
@@ -190,7 +201,6 @@ export const toggleTicketVisibility = async (req: Request, res: Response): Promi
   }
 };
 
-
 export const updateTicket = async (req: Request, res: Response): Promise<void> => {
   const { id } = req.params;
   const updates = req.body;
@@ -228,4 +238,36 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
   res.json({ message: "Ticket updated successfully", ticket });
 };
 
-  
+export const getTicketsForMyClub = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+
+    if (!user || user.role !== "clubowner") {
+      res.status(403).json({ error: "Forbidden: Only clubowners can access this" });
+      return;
+    }
+
+    const clubRepo = AppDataSource.getRepository(Club);
+    const ticketRepo = AppDataSource.getRepository(Ticket);
+
+    const club = await clubRepo.findOne({
+      where: { ownerId: user.id },
+    });
+
+    if (!club) {
+      console.error("❌ No club found for user:", user.id);
+      res.status(404).json({ error: "Club not found for this user" });
+      return;
+    }
+
+    const tickets = await ticketRepo.find({
+      where: { club: { id: club.id } },
+      order: { priority: "ASC" },
+    });
+
+    res.json(tickets);
+  } catch (error) {
+    console.error("❌ Error fetching my club's tickets:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};

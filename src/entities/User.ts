@@ -4,7 +4,10 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
 } from "typeorm";
+import { Club } from "./Club";
 
 export type UserRole = "user" | "clubowner" | "bouncer" | "admin";
 
@@ -19,12 +22,18 @@ export class User {
   @Column()
   password!: string;
 
-  // ✅ Corrected role type
   @Column({
     type: "varchar",
     default: "user",
   })
   role!: UserRole;
+
+  @ManyToOne(() => Club, { onDelete: "SET NULL" })
+  @JoinColumn({ name: "clubId" })
+  club?: Club;
+
+  @Column({ nullable: true })
+  clubId?: string;
 
   @CreateDateColumn()
   createdAt!: Date;

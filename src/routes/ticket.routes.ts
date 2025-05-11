@@ -6,7 +6,8 @@ import {
   getTicketById,
   updateTicket,
   deleteTicket,
-  toggleTicketVisibility
+  toggleTicketVisibility,
+  getTicketsForMyClub
 } from "../controllers/ticket.controller";
 import { authMiddleware, requireClubOwnerOrAdmin } from "../middlewares/authMiddleware";
 
@@ -14,6 +15,7 @@ const router = Router();
 
 // ✅ Public access
 router.get("/", getAllTickets);
+router.get("/my-club", authMiddleware, requireClubOwnerOrAdmin, getTicketsForMyClub);
 router.get("/:id", getTicketById);
 router.get("/club/:id", getTicketsByClub);
 
