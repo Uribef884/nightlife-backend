@@ -11,6 +11,7 @@ import cookieParser from "cookie-parser";
 import orderRoutes from "./routes/order.routes";
 import { authMiddleware } from "./middlewares/authMiddleware";
 import bouncerRoutes from "./routes/bouncer.routes";
+import cartRoutes from "./routes/cart.routes";
 
 dotenv.config();
 
@@ -32,6 +33,7 @@ app.use("/clubs", clubRoutes);
 app.use("/tickets", ticketRoutes); // leave public access to GET endpoints
 app.use("/orders", authMiddleware, orderRoutes);
 app.use("/bouncers", bouncerRoutes);
+app.use("/cart", cartRoutes);
 // DB Connection + Server Start
 AppDataSource.initialize()
   .then(() => {

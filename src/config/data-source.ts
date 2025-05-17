@@ -3,6 +3,7 @@ import { Club } from "../entities/Club";
 import { Ticket } from "../entities/Ticket";
 import { TicketPurchase } from "../entities/TicketPurchase";
 import { User } from "../entities/User";
+import { CartItem } from "../entities/CartItem";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -16,5 +17,5 @@ export const AppDataSource = new DataSource({
   database: process.env.DB_NAME,
   synchronize: true,
   logging: false,
-  entities: [Club, Ticket, TicketPurchase, User, ],
+  entities: [Club, Ticket, TicketPurchase, User, CartItem ],
 });
