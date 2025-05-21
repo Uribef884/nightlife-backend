@@ -2,10 +2,9 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
+  ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
-  ManyToOne,
-  JoinColumn,
 } from "typeorm";
 import { User } from "./User";
 import { Ticket } from "./Ticket";
@@ -15,22 +14,17 @@ export class CartItem {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
-  @JoinColumn({ name: "userId" })
-  user?: User;
-
   @Column({ nullable: true })
   userId?: string;
 
-  @ManyToOne(() => Ticket, { eager: true, onDelete: "CASCADE" })
-  @JoinColumn({ name: "ticketId" })
-  ticket!: Ticket;
+  @Column({ nullable: true })
+  sessionId?: string; // 👈 For anonymous users
 
   @Column()
   ticketId!: string;
 
   @Column()
-  date!: string; // e.g., "2025-05-24"
+  date!: string;
 
   @Column()
   quantity!: number;
@@ -40,4 +34,7 @@ export class CartItem {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @ManyToOne(() => Ticket, (ticket) => ticket.cartItems)
+  ticket!: Ticket;
 }

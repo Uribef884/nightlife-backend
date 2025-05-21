@@ -5,11 +5,16 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
+  OneToMany
 } from "typeorm";
 import { Club } from "./Club";
+import { CartItem } from "./CartItem";
 
 @Entity()
 export class Ticket {
+  @OneToMany(() => CartItem, (cartItem: CartItem) => cartItem.ticket)
+  cartItems!: CartItem[];
+
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
@@ -42,4 +47,5 @@ export class Ticket {
 
   @ManyToOne(() => Club, (club) => club.tickets, { onDelete: "CASCADE" })
   club!: Club;
+
 }

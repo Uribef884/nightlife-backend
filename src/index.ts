@@ -12,20 +12,21 @@ import orderRoutes from "./routes/order.routes";
 import { authMiddleware } from "./middlewares/authMiddleware";
 import bouncerRoutes from "./routes/bouncer.routes";
 import cartRoutes from "./routes/cart.routes";
+import { attachSessionId } from "./middlewares/sessionMiddleware";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
-app.use(cookieParser()); // ✅ make sure this comes before authMiddleware
- // ✅ global middleware
 
 
 // Middleware
-app.use(cookieParser());
+app.use(express.json());
+app.use(cookieParser()); // ✅ make sure this comes before authMiddleware
+ // ✅ global middleware
+app.use(attachSessionId); // Must come before routes that need session
 app.use(cors());
 app.use(helmet());
-app.use(express.json());
 
 // Routes
 app.use("/auth", authRoutes);

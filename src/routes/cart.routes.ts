@@ -10,9 +10,9 @@ import { authMiddleware } from "../middlewares/authMiddleware";
 const router = Router();
 
 // Anonymous and authenticated users can use the cart
-router.post("/add", authMiddleware, addToCart);
-router.patch("/update", authMiddleware, updateCartItem);
-router.delete("/item/:id", authMiddleware, removeCartItem);
-router.get("/", authMiddleware, getUserCart);
+router.post("/add", addToCart);
+router.patch("/update", updateCartItem);
+router.delete("/item/:id", removeCartItem);
+router.get("/", getUserCart);
 
 export default router;

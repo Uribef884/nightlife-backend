@@ -4,10 +4,16 @@ import { CartItem } from "../entities/CartItem";
 import { AuthenticatedRequest } from "../types/express";
 import { Ticket } from "../entities/Ticket";
 
+function ownsCartItem(item: CartItem, userId?: string, sessionId?: string): boolean {
+  if (userId) return item.userId === userId;
+  return item.sessionId === sessionId;
+}
+
 export const addToCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { ticketId, date, quantity } = req.body;
     const userId = req.user?.id;
+    const sessionId = !userId ? (req as any).sessionId : undefined; // ❗ ignore session if logged in
 
     if (!ticketId || !date || quantity == null) {
       res.status(400).json({ error: "Missing required fields" });
@@ -27,10 +33,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
 
     const maxDate = new Date(today);
     maxDate.setDate(maxDate.getDate() + 21);
-    const maxY = maxDate.getFullYear();
-    const maxM = String(maxDate.getMonth() + 1).padStart(2, "0");
-    const maxD = String(maxDate.getDate()).padStart(2, "0");
-    const maxStr = `${maxY}-${maxM}-${maxD}`;
+    const maxStr = `${maxDate.getFullYear()}-${String(maxDate.getMonth() + 1).padStart(2, "0")}-${String(maxDate.getDate()).padStart(2, "0")}`;
 
     if (date < todayStr) {
       res.status(400).json({ error: "Cannot select a past date" });
@@ -51,14 +54,14 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       return;
     }
 
-    // 🔒 Enforce maxPerPerson constraint
+    const whereClause = userId ? { userId } : { sessionId };
+
     const existingItems = await cartRepo.find({
-      where: userId ? { userId } : {},
-      relations: ["ticket", "ticket.club"]
+      where: whereClause,
+      relations: ["ticket", "ticket.club"],
     });
 
     let totalTicketsInCart = 0;
-
     for (const item of existingItems) {
       if (item.ticket.id === ticketId && item.date === date) {
         totalTicketsInCart += item.quantity;
@@ -72,15 +75,12 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       return;
     }
 
-    // 🧠 Enforce same club/date rule
     if (existingItems.length > 0) {
       const { ticket: existingTicket, date: existingDate } = existingItems[0];
-
       if (ticket.club.id !== existingTicket.club.id) {
         res.status(400).json({ error: "All tickets in cart must be from the same nightclub" });
         return;
       }
-
       if (date !== existingDate) {
         res.status(400).json({ error: "All tickets in cart must be for the same date" });
         return;
@@ -88,7 +88,9 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
     }
 
     const existing = await cartRepo.findOne({
-      where: userId ? { userId, ticketId, date } : { ticketId, date }
+      where: userId
+        ? { userId, ticketId, date }
+        : { sessionId, ticketId, date },
     });
 
     if (existing) {
@@ -103,7 +105,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       ticket,
       date,
       quantity,
-      ...(userId && { userId }) // only attach if authenticated
+      ...(userId ? { userId } : { sessionId }),
     });
 
     await cartRepo.save(newItem);
@@ -118,16 +120,17 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
   try {
     const { id, quantity } = req.body;
     const userId = req.user?.id;
-    const cartRepo = AppDataSource.getRepository(CartItem);
+    const sessionId = !userId ? (req as any).sessionId : undefined;
 
     if (typeof quantity !== "number" || quantity <= 0) {
       res.status(400).json({ error: "Quantity must be a positive number" });
       return;
     }
 
+    const cartRepo = AppDataSource.getRepository(CartItem);
     const item = await cartRepo.findOne({
       where: { id },
-      relations: ["ticket"]
+      relations: ["ticket"],
     });
 
     if (!item) {
@@ -135,9 +138,8 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    // ❗️Check ownership
-    if (item.userId && item.userId !== userId) {
-      res.status(403).json({ error: "You cannot update another user's cart" });
+    if (!ownsCartItem(item, userId, sessionId)) {
+      res.status(403).json({ error: "You cannot update another user's cart item" });
       return;
     }
 
@@ -166,8 +168,9 @@ export const removeCartItem = async (req: AuthenticatedRequest, res: Response): 
   try {
     const { id } = req.params;
     const userId = req.user?.id;
-    const cartRepo = AppDataSource.getRepository(CartItem);
+    const sessionId = !userId ? (req as any).sessionId : undefined;
 
+    const cartRepo = AppDataSource.getRepository(CartItem);
     const item = await cartRepo.findOneBy({ id });
 
     if (!item) {
@@ -175,8 +178,7 @@ export const removeCartItem = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    // ❗️Check ownership
-    if (item.userId && item.userId !== userId) {
+    if (!ownsCartItem(item, userId, sessionId)) {
       res.status(403).json({ error: "You cannot delete another user's cart item" });
       return;
     }
@@ -191,10 +193,11 @@ export const removeCartItem = async (req: AuthenticatedRequest, res: Response): 
 
 export const getUserCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const cartRepo = AppDataSource.getRepository(CartItem);
-
     const userId = req.user?.id;
-    const whereClause = userId ? { userId } : {};
+    const sessionId = !userId ? (req as any).sessionId : undefined;
+
+    const cartRepo = AppDataSource.getRepository(CartItem);
+    const whereClause = userId ? { userId } : { sessionId };
 
     const items = await cartRepo.find({
       where: whereClause,
@@ -207,4 +210,3 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
     res.status(500).json({ error: "Internal server error" });
   }
 };
-
