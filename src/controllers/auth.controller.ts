@@ -4,7 +4,9 @@ import { User } from "../entities/User";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { isDisposableEmail } from "../utils/disposableEmailValidator";
-
+import { clearAnonymousCart } from "../utils/clearAnonymousCart";
+import { AuthenticatedRequest } from "../types/express";
+import { CartItem } from "../entities/CartItem";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
@@ -52,7 +54,6 @@ export async function register(req: Request, res: Response): Promise<void> {
   }
 }
 
-
 export async function login(req: Request, res: Response): Promise<void> {
   const { email, password } = req.body;
 
@@ -74,16 +75,19 @@ export async function login(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  // 🔒 Clear any cart tied to sessionId before switching to userId
+  await clearAnonymousCart(req.cookies?.sessionId);
+  res.clearCookie("sessionId");
+
   const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, {
     expiresIn: "7d",
   });
 
-  // 👇 Set token as HttpOnly cookie
   res.cookie("token", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production", // HTTPS only in prod
+    secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
   res.json({
@@ -92,14 +96,32 @@ export async function login(req: Request, res: Response): Promise<void> {
   });
 }
 
-export function logout(req: Request, res: Response): void {
-  res.clearCookie("token", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
-  });
+export async function logout(req: Request, res: Response): Promise<void> {
+  const sessionId = req.cookies?.sessionId;
+  const userId = (req as AuthenticatedRequest).user?.id;
 
-  res.json({ message: "Logged out successfully" });
+  const cartRepo = AppDataSource.getRepository(CartItem);
+
+  try {
+    if (userId) {
+      await cartRepo.delete({ userId });
+      res.clearCookie("token", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+      });
+    }
+
+    if (sessionId) {
+      await clearAnonymousCart(sessionId);
+      res.clearCookie("sessionId");
+    }
+
+    res.json({ message: "Logged out successfully" });
+  } catch (error) {
+    console.error("❌ Error during logout:", error);
+    res.status(500).json({ error: "Error while logging out" });
+  }
 }
 
 export async function deleteUser(req: Request, res: Response): Promise<void> {

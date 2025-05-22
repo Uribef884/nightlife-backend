@@ -1,4 +1,4 @@
-import { JwtPayload } from "../../../middlewares/requireAuth";
+import { JwtPayload } from "../jwt";
 
 declare global {
   namespace Express {
@@ -8,4 +8,4 @@ declare global {
   }
 }
 
-export {}; // <--- REQUIRED so it's treated as a module
+export {}; // ensures it's treated as a module

@@ -6,9 +6,14 @@ import { AuthenticatedRequest } from "../types/express";
 
 export async function createTicket(req: Request, res: Response): Promise<void> {
   try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
     const repo = AppDataSource.getRepository(Ticket);
     const clubRepo = AppDataSource.getRepository(Club);
-    const user = req.user;
 
     const {
       name,
@@ -29,7 +34,6 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
     let club: Club | null = null;
 
     if (user.role === "admin") {
-      // Admins can specify any clubId
       if (!clubId) {
         res.status(400).json({ error: "Admin must specify clubId" });
         return;
@@ -45,7 +49,6 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
         return;
       }
     } else if (user.role === "clubowner") {
-      // Clubowners can only use their own club
       club = await clubRepo.findOne({
         where: { owner: { id: user.id } },
       });
@@ -79,43 +82,48 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
 }
 
 export async function getTicketsByClub(req: Request, res: Response): Promise<void> {
-    try {
-      const { id } = req.params;
-  
-      const repo = AppDataSource.getRepository(Ticket);
-      const tickets = await repo.find({
-        where: { club: { id } },
-        order: { priority: "ASC" }
-      });
-  
-      res.json(tickets);
-    } catch (error) {
-      console.error("❌ Error fetching tickets:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
-  }
+  try {
+    const { id } = req.params;
+    const repo = AppDataSource.getRepository(Ticket);
 
-  export async function getAllTickets(req: Request, res: Response): Promise<void> {
-    try {
-      const repo = AppDataSource.getRepository(Ticket);
-      const tickets = await repo.find({
-        where: { isActive: true },
-        relations: ["club"],
-        order: { priority: "ASC" },
-      });
-  
-      res.json(tickets);
-    } catch (error) {
-      console.error("❌ Error fetching tickets:", error);
-      res.status(500).json({ error: "Internal server error" });
-    }
+    const tickets = await repo.find({
+      where: { club: { id } },
+      order: { priority: "ASC" }
+    });
+
+    res.json(tickets);
+  } catch (error) {
+    console.error("❌ Error fetching tickets:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
+}
+
+export async function getAllTickets(req: Request, res: Response): Promise<void> {
+  try {
+    const repo = AppDataSource.getRepository(Ticket);
+    const tickets = await repo.find({
+      where: { isActive: true },
+      relations: ["club"],
+      order: { priority: "ASC" },
+    });
+
+    res.json(tickets);
+  } catch (error) {
+    console.error("❌ Error fetching tickets:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
 
 export async function getTicketById(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const { id } = req.params;
-    const user = req.user;
 
     const ticket = await ticketRepo.findOne({
       where: { id },
@@ -127,8 +135,7 @@ export async function getTicketById(req: AuthenticatedRequest, res: Response): P
       return;
     }
 
-    // ⛔ Restrict clubowners from accessing others' tickets
-    if (user?.role === "clubowner" && ticket.club.ownerId !== user.id) {
+    if (user.role === "clubowner" && ticket.club.ownerId !== user.id) {
       res.status(403).json({ error: "Forbidden: This ticket doesn't belong to your club" });
       return;
     }
@@ -140,11 +147,15 @@ export async function getTicketById(req: AuthenticatedRequest, res: Response): P
   }
 }
 
-
 export async function deleteTicket(req: Request, res: Response): Promise<void> {
   try {
-    const { id } = req.params;
     const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { id } = req.params;
     const repo = AppDataSource.getRepository(Ticket);
 
     const ticket = await repo.findOne({
@@ -172,8 +183,13 @@ export async function deleteTicket(req: Request, res: Response): Promise<void> {
 
 export const toggleTicketVisibility = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
     const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { id } = req.params;
     const repo = AppDataSource.getRepository(Ticket);
 
     const ticket = await repo.findOne({
@@ -202,9 +218,14 @@ export const toggleTicketVisibility = async (req: Request, res: Response): Promi
 };
 
 export const updateTicket = async (req: Request, res: Response): Promise<void> => {
+  const user = req.user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
   const { id } = req.params;
   const updates = req.body;
-  const user = req.user;
 
   const ticketRepo = AppDataSource.getRepository(Ticket);
   const ticket = await ticketRepo.findOne({
