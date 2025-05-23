@@ -13,6 +13,7 @@ import { authMiddleware } from "./middlewares/authMiddleware";
 import bouncerRoutes from "./routes/bouncer.routes";
 import cartRoutes from "./routes/cart.routes";
 import { attachSessionId } from "./middlewares/sessionMiddleware";
+import checkoutRoutes from "./routes/checkout.routes";
 
 dotenv.config();
 
@@ -35,6 +36,8 @@ app.use("/tickets", ticketRoutes); // leave public access to GET endpoints
 app.use("/orders", authMiddleware, orderRoutes);
 app.use("/bouncers", bouncerRoutes);
 app.use("/cart", cartRoutes);
+app.use("/checkout", checkoutRoutes);
+
 // DB Connection + Server Start
 AppDataSource.initialize()
   .then(() => {

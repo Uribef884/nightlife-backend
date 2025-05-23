@@ -13,7 +13,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
   try {
     const { ticketId, date, quantity } = req.body;
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionId : undefined; // ❗ ignore session if logged in
+    const sessionId = !userId ? (req as any).sessionId : undefined;
 
     if (!ticketId || !date || quantity == null) {
       res.status(400).json({ error: "Missing required fields" });
@@ -31,17 +31,8 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
     const dd = String(today.getDate()).padStart(2, "0");
     const todayStr = `${yyyy}-${mm}-${dd}`;
 
-    const maxDate = new Date(today);
-    maxDate.setDate(maxDate.getDate() + 21);
-    const maxStr = `${maxDate.getFullYear()}-${String(maxDate.getMonth() + 1).padStart(2, "0")}-${String(maxDate.getDate()).padStart(2, "0")}`;
-
     if (date < todayStr) {
       res.status(400).json({ error: "Cannot select a past date" });
-      return;
-    }
-
-    if (date > maxStr) {
-      res.status(400).json({ error: "You can only select dates within 3 weeks" });
       return;
     }
 
@@ -52,6 +43,34 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
       return;
+    }
+
+    // ✅ Only enforce 3-week rule if no availableDates
+    const maxDate = new Date(today);
+    maxDate.setDate(maxDate.getDate() + 21);
+    const maxStr = `${maxDate.getFullYear()}-${String(maxDate.getMonth() + 1).padStart(2, "0")}-${String(maxDate.getDate()).padStart(2, "0")}`;
+
+    if ((!ticket.availableDates || ticket.availableDates.length === 0) && date > maxStr) {
+      res.status(400).json({ error: "You can only select dates within 3 weeks" });
+      return;
+    }
+
+    // ✅ Validate availableDates or fallback to club openDays
+    const clubOpenDays = ticket.club.openDays || [];
+    if (ticket.availableDates && ticket.availableDates.length > 0) {
+      const normalizedAvailableDates = ticket.availableDates.map(d =>
+        new Date(d).toISOString().split("T")[0]
+      );
+      if (!normalizedAvailableDates.includes(date)) {
+        res.status(400).json({ error: "This ticket is not available on the selected date" });
+        return;
+      }
+    } else {
+      const selectedDay = new Date(`${date}T12:00:00`).toLocaleString("en-US", { weekday: "long" });
+      if (!clubOpenDays.includes(selectedDay)) {
+        res.status(400).json({ error: `This club is not open on ${selectedDay}` });
+        return;
+      }
     }
 
     const whereClause = userId ? { userId } : { sessionId };
@@ -70,7 +89,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
 
     if (totalTicketsInCart + quantity > ticket.maxPerPerson) {
       res.status(400).json({
-        error: `You can only buy up to ${ticket.maxPerPerson} tickets of this type`
+        error: `You can only buy up to ${ticket.maxPerPerson} tickets of this type`,
       });
       return;
     }
@@ -100,6 +119,12 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       return;
     }
 
+    // 🔒 FINAL CHECK: enforce ownership
+    if (!userId && !sessionId) {
+      res.status(400).json({ error: "Could not determine cart ownership" });
+      return;
+    }
+
     const newItem = cartRepo.create({
       ticketId,
       ticket,
@@ -122,15 +147,15 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
     const userId = req.user?.id;
     const sessionId = !userId ? (req as any).sessionId : undefined;
 
-    if (typeof quantity !== "number" || quantity <= 0) {
-      res.status(400).json({ error: "Quantity must be a positive number" });
+    if (!id || typeof quantity !== "number" || quantity <= 0) {
+      res.status(400).json({ error: "Valid ID and quantity are required" });
       return;
     }
 
     const cartRepo = AppDataSource.getRepository(CartItem);
     const item = await cartRepo.findOne({
       where: { id },
-      relations: ["ticket"],
+      relations: ["ticket", "ticket.club"],
     });
 
     if (!item) {
@@ -138,12 +163,13 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    if (!ownsCartItem(item, userId, sessionId)) {
+    const ownsItem = (userId && item.userId === userId) || (sessionId && item.sessionId === sessionId);
+    if (!ownsItem) {
       res.status(403).json({ error: "You cannot update another user's cart item" });
       return;
     }
 
-    const ticket = await AppDataSource.getRepository(Ticket).findOneBy({ id: item.ticketId });
+    const ticket = item.ticket;
     if (!ticket) {
       res.status(404).json({ error: "Associated ticket not found" });
       return;

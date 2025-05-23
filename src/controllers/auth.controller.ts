@@ -75,11 +75,15 @@ export async function login(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // 🔒 Clear any cart tied to sessionId before switching to userId
-  await clearAnonymousCart(req.cookies?.sessionId);
-  res.clearCookie("sessionId");
+  // ✅ Clear any anonymous cart + session cookie
+  const sessionId = req.cookies?.sessionId;
+  if (sessionId) {
+    await clearAnonymousCart(sessionId);
+    res.clearCookie("sessionId");
+    (req as any).sessionId = undefined; // prevent this request from using stale sessionId
+  }
 
-  const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, {
+  const token = jwt.sign({ id: user.id, role: user.role, email: user.email }, JWT_SECRET, {
     expiresIn: "7d",
   });
 
@@ -114,7 +118,11 @@ export async function logout(req: Request, res: Response): Promise<void> {
 
     if (sessionId) {
       await clearAnonymousCart(sessionId);
-      res.clearCookie("sessionId");
+      res.clearCookie("sessionId", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+      });
     }
 
     res.json({ message: "Logged out successfully" });
