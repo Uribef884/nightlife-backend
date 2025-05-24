@@ -5,6 +5,7 @@ import { CartItem } from "../entities/CartItem";
 import { TicketPurchase } from "../entities/TicketPurchase";
 import { Ticket } from "../entities/Ticket";
 import { v4 as uuidv4 } from "uuid";
+import { PurchaseTransaction } from "../entities/PurchaseTransaction";
 
 function generateEncryptedQR(): string {
   return "encrypted:" + uuidv4(); // placeholder for real encryption
@@ -29,6 +30,7 @@ export const checkout = async (req: AuthenticatedRequest, res: Response): Promis
     const cartRepo = AppDataSource.getRepository(CartItem);
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
+    const transactionRepo = AppDataSource.getRepository(PurchaseTransaction);
 
     const cartItems = await cartRepo.find({
       where: userId ? { userId } : { sessionId },
@@ -40,6 +42,15 @@ export const checkout = async (req: AuthenticatedRequest, res: Response): Promis
       return;
     }
 
+    // 🧮 Global aggregates for this transaction
+    let totalPaid = 0;
+    let clubReceives = 0;
+    let platformReceives = 0;
+    let gatewayFee = 0;
+    let gatewayIVA = 0;
+
+    const firstClubId = cartItems[0].ticket.club.id;
+    const today = new Date().toISOString().split("T")[0];
     const purchasesToCreate: TicketPurchase[] = [];
 
     for (const item of cartItems) {
@@ -55,58 +66,67 @@ export const checkout = async (req: AuthenticatedRequest, res: Response): Promis
         return;
       }
 
-      if (Array.isArray(latestTicket.availableDates) && latestTicket.availableDates.length > 0) {
-        const allowedDates = latestTicket.availableDates.map(d =>
-          new Date(d).toISOString().split("T")[0]
-        );
-        if (!allowedDates.includes(date)) {
-          res.status(400).json({ error: `Date ${date} not allowed for this ticket` });
-          return;
-        }
-      } else {
-        const day = new Date(`${date}T12:00:00`).toLocaleString("en-US", { weekday: "long" });
-        if (!latestTicket.club.openDays.includes(day)) {
-          res.status(400).json({ error: `${latestTicket.club.name} is not open on ${day}` });
-          return;
-        }
-      }
-
       const platformFeeRate = 0.05;
       const gatewayRate = 0.0299;
       const fixedFee = 900;
       const ivaRate = 0.19;
 
       const platformFee = Math.round(latestTicket.price * platformFeeRate);
-      const gatewayFee = Math.round(latestTicket.price * gatewayRate + fixedFee);
-      const gatewayIVA = Math.round(gatewayFee * ivaRate);
-
-      const clubReceives = latestTicket.price - platformFee;
-      const userPaid = latestTicket.price;
+      const gatewayRaw = Math.round(latestTicket.price * gatewayRate + fixedFee);
+      const gatewayIva = Math.round(gatewayRaw * ivaRate);
+      const clubNet = latestTicket.price - platformFee;
 
       for (let i = 0; i < quantity; i++) {
-        const purchase = purchaseRepo.create({
-          ticket,
-          ticketId: latestTicket.id,
-          clubId: latestTicket.club.id,
-          date,
-          email,
-          qrCodeEncrypted: generateEncryptedQR(),
-          ...(userId ? { userId } : {}),
-          userPaid,
-          clubReceives,
-          platformReceives: platformFee,
-          gatewayFee,
-          gatewayIVA,
-          platformFeeApplied: platformFee,
-        });
-        purchasesToCreate.push(purchase);
+        totalPaid += latestTicket.price;
+        platformReceives += platformFee;
+        gatewayFee += gatewayRaw;
+        gatewayIVA += gatewayIva;
+        clubReceives += clubNet;
+
+        purchasesToCreate.push(
+          purchaseRepo.create({
+            ticket,
+            ticketId: latestTicket.id,
+            clubId: latestTicket.club.id,
+            date,
+            email,
+            qrCodeEncrypted: generateEncryptedQR(),
+            ...(userId ? { userId } : {}),
+            userPaid: latestTicket.price,
+            clubReceives: clubNet,
+            platformReceives: platformFee,
+            gatewayFee: gatewayRaw,
+            gatewayIVA: gatewayIva,
+            platformFeeApplied: platformFee,
+            purchaseTransactionId: "", // to be set after creating the transaction
+          })
+        );
       }
     }
 
-    const savedPurchases = await purchaseRepo.save(purchasesToCreate);
+    // ✨ Create and assign the transaction
+    const transaction = transactionRepo.create({
+      userId,
+      clubId: firstClubId,
+      email,
+      date: today,
+      totalPaid,
+      clubReceives,
+      platformReceives,
+      gatewayFee,
+      gatewayIVA,
+    });
+
+    const savedTx = await transactionRepo.save(transaction);
+
+    for (const p of purchasesToCreate) {
+      p.purchaseTransactionId = savedTx.id;
+    }
+
+    await purchaseRepo.save(purchasesToCreate);
     await cartRepo.delete(userId ? { userId } : { sessionId });
 
-    const grouped = savedPurchases.reduce<Record<string, any>>((acc, p) => {
+    const summary = purchasesToCreate.reduce<Record<string, any>>((acc, p) => {
       const key = `${p.ticketId}-${p.date}`;
       if (!acc[key]) {
         acc[key] = {
@@ -122,11 +142,10 @@ export const checkout = async (req: AuthenticatedRequest, res: Response): Promis
       return acc;
     }, {});
 
-    const summary = Object.values(grouped);
-
     res.status(201).json({
       message: "Checkout successful",
-      summary,
+      transactionId: savedTx.id,
+      summary: Object.values(summary),
     });
   } catch (err) {
     console.error("❌ Error during checkout:", err);

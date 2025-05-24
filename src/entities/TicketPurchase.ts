@@ -10,6 +10,7 @@ import {
 import { Ticket } from "./Ticket";
 import { User } from "./User";
 import { Club } from "./Club";
+import { PurchaseTransaction } from "./PurchaseTransaction";
 
 @Entity()
 export class TicketPurchase {
@@ -23,14 +24,14 @@ export class TicketPurchase {
   @Column()
   ticketId!: string;
 
-  @ManyToOne(() => User, { nullable: true, eager: false })
+  @ManyToOne(() => User, { nullable: true })
   @JoinColumn({ name: "userId" })
   user?: User;
 
   @Column({ nullable: true })
   userId?: string;
 
-  @ManyToOne(() => Club, { eager: false })
+  @ManyToOne(() => Club)
   @JoinColumn({ name: "clubId" })
   club!: Club;
 
@@ -47,6 +48,9 @@ export class TicketPurchase {
   buyerIdNumber?: string;
 
   @Column()
+  email!: string;
+
+  @Column()
   qrCodeEncrypted!: string;
 
   @Column({ default: false })
@@ -54,9 +58,6 @@ export class TicketPurchase {
 
   @Column({ type: "timestamp", nullable: true })
   usedAt?: Date;
-
-  @Column()
-  email!: string;
 
   @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
   userPaid!: number;
@@ -73,8 +74,24 @@ export class TicketPurchase {
   @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
   gatewayIVA!: number;
 
+  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) }, nullable: true })
+  retentionICA?: number;
+
+  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) }, nullable: true })
+  retentionIVA?: number;
+
+  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) }, nullable: true })
+  retentionFuente?: number;
+
   @Column("numeric")
   platformFeeApplied!: number;
+
+  @ManyToOne(() => PurchaseTransaction, (t) => t.purchases)
+  @JoinColumn({ name: "purchaseTransactionId" })
+  transaction!: PurchaseTransaction;
+
+  @Column()
+  purchaseTransactionId!: string;
 
   @CreateDateColumn()
   createdAt!: Date;
