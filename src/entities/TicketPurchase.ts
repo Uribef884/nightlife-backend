@@ -55,8 +55,26 @@ export class TicketPurchase {
   @Column({ type: "timestamp", nullable: true })
   usedAt?: Date;
 
-  @Column() // ✅ NEW
+  @Column()
   email!: string;
+
+  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
+  userPaid!: number;
+
+  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
+  clubReceives!: number;
+
+  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
+  platformReceives!: number;
+
+  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
+  gatewayFee!: number;
+
+  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
+  gatewayIVA!: number;
+
+  @Column("numeric")
+  platformFeeApplied!: number;
 
   @CreateDateColumn()
   createdAt!: Date;

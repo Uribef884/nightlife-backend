@@ -14,9 +14,15 @@ export const checkout = async (req: AuthenticatedRequest, res: Response): Promis
   try {
     const userId = req.user?.id;
     const sessionId = !userId ? (req as any).sessionId : undefined;
+    const email = req.user?.email || req.body.email;
 
     if (!userId && !sessionId) {
       res.status(400).json({ error: "User or session ID required" });
+      return;
+    }
+
+    if (!email) {
+      res.status(400).json({ error: "Email is required to complete checkout" });
       return;
     }
 
@@ -39,7 +45,6 @@ export const checkout = async (req: AuthenticatedRequest, res: Response): Promis
     for (const item of cartItems) {
       const { ticket, quantity, date } = item;
 
-      // Ensure ticket still exists and is active
       const latestTicket = await ticketRepo.findOne({
         where: { id: ticket.id },
         relations: ["club"],
@@ -50,8 +55,7 @@ export const checkout = async (req: AuthenticatedRequest, res: Response): Promis
         return;
       }
 
-      // Validate date again
-      if (latestTicket.availableDates && latestTicket.availableDates.length > 0) {
+      if (Array.isArray(latestTicket.availableDates) && latestTicket.availableDates.length > 0) {
         const allowedDates = latestTicket.availableDates.map(d =>
           new Date(d).toISOString().split("T")[0]
         );
@@ -67,16 +71,33 @@ export const checkout = async (req: AuthenticatedRequest, res: Response): Promis
         }
       }
 
-      const count = latestTicket.maxPerPerson === 1 ? 1 : quantity;
+      const platformFeeRate = 0.05;
+      const gatewayRate = 0.0299;
+      const fixedFee = 900;
+      const ivaRate = 0.19;
 
-      for (let i = 0; i < count; i++) {
+      const platformFee = Math.round(latestTicket.price * platformFeeRate);
+      const gatewayFee = Math.round(latestTicket.price * gatewayRate + fixedFee);
+      const gatewayIVA = Math.round(gatewayFee * ivaRate);
+
+      const clubReceives = latestTicket.price - platformFee;
+      const userPaid = latestTicket.price;
+
+      for (let i = 0; i < quantity; i++) {
         const purchase = purchaseRepo.create({
           ticket,
           ticketId: latestTicket.id,
           clubId: latestTicket.club.id,
           date,
+          email,
           qrCodeEncrypted: generateEncryptedQR(),
           ...(userId ? { userId } : {}),
+          userPaid,
+          clubReceives,
+          platformReceives: platformFee,
+          gatewayFee,
+          gatewayIVA,
+          platformFeeApplied: platformFee,
         });
         purchasesToCreate.push(purchase);
       }
@@ -85,14 +106,27 @@ export const checkout = async (req: AuthenticatedRequest, res: Response): Promis
     const savedPurchases = await purchaseRepo.save(purchasesToCreate);
     await cartRepo.delete(userId ? { userId } : { sessionId });
 
+    const grouped = savedPurchases.reduce<Record<string, any>>((acc, p) => {
+      const key = `${p.ticketId}-${p.date}`;
+      if (!acc[key]) {
+        acc[key] = {
+          ticketId: p.ticketId,
+          ticketName: p.ticket.name,
+          date: p.date,
+          quantity: 0,
+          qrCodes: [],
+        };
+      }
+      acc[key].quantity += 1;
+      acc[key].qrCodes.push(p.qrCodeEncrypted);
+      return acc;
+    }, {});
+
+    const summary = Object.values(grouped);
+
     res.status(201).json({
       message: "Checkout successful",
-      purchases: savedPurchases.map(p => ({
-        id: p.id,
-        ticketName: p.ticket.name,
-        date: p.date,
-        qrCode: p.qrCodeEncrypted,
-      })),
+      summary,
     });
   } catch (err) {
     console.error("❌ Error during checkout:", err);
