@@ -20,7 +20,7 @@ export class PurchaseTransaction {
   clubId!: string;
 
   @Column()
-  email!: string;
+  email!: string; // ✅ DO NOT leave optional — must be defined
 
   @Column()
   date!: string;
@@ -55,6 +55,6 @@ export class PurchaseTransaction {
   @UpdateDateColumn()
   updatedAt!: Date;
 
-  @OneToMany(() => TicketPurchase, (p) => p.transaction)
+  @OneToMany(() => TicketPurchase, (purchase) => purchase.transaction)
   purchases!: TicketPurchase[];
 }

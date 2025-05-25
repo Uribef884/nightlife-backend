@@ -1,154 +1,134 @@
-import { Response } from "express";
+import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
-import { AuthenticatedRequest } from "../types/express";
 import { CartItem } from "../entities/CartItem";
-import { TicketPurchase } from "../entities/TicketPurchase";
 import { Ticket } from "../entities/Ticket";
-import { v4 as uuidv4 } from "uuid";
+import { TicketPurchase } from "../entities/TicketPurchase";
 import { PurchaseTransaction } from "../entities/PurchaseTransaction";
+import { calculatePlatformFee, calculateGatewayFees } from "../utils/feeUtils";
+import { v4 as uuidv4 } from "uuid";
+// import { sendQREmail } from "../services/emailService"; // For future email delivery
 
-function generateEncryptedQR(): string {
-  return "encrypted:" + uuidv4(); // placeholder for real encryption
+// Temporary base64 QR generator
+function generateFakeQR(ticketId: string, date: string, email: string): string {
+  return Buffer.from(`${ticketId}|${date}|${email}`).toString("base64");
 }
 
-export const checkout = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionId : undefined;
-    const email = req.user?.email || req.body.email;
+export const checkout = async (req: Request, res: Response) => {
 
-    if (!userId && !sessionId) {
-      res.status(400).json({ error: "User or session ID required" });
-      return;
-    }
+  const userId = (req as any).user?.id ?? null;
+  const sessionId = req.cookies?.sessionId ?? null;
+  
+  let email: string | undefined = (req as any).user?.email ?? req.body?.email;
 
-    if (!email) {
-      res.status(400).json({ error: "Email is required to complete checkout" });
-      return;
-    }
+  if (!email) {
+    return res.status(400).json({ error: "Email is required for checkout" });
+  }
 
-    const cartRepo = AppDataSource.getRepository(CartItem);
-    const ticketRepo = AppDataSource.getRepository(Ticket);
-    const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
-    const transactionRepo = AppDataSource.getRepository(PurchaseTransaction);
+  const cartRepo = AppDataSource.getRepository(CartItem);
+  const ticketRepo = AppDataSource.getRepository(Ticket);
+  const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
+  const transactionRepo = AppDataSource.getRepository(PurchaseTransaction);
 
-    const cartItems = await cartRepo.find({
-      where: userId ? { userId } : { sessionId },
-      relations: ["ticket", "ticket.club"],
-    });
+  const cartItems = await cartRepo.find({
+    where: userId ? { userId } : { sessionId },
+    relations: ["ticket"],
+  });
 
-    if (cartItems.length === 0) {
-      res.status(400).json({ error: "Cart is empty" });
-      return;
-    }
+  if (!cartItems.length) {
+    return res.status(400).json({ error: "Cart is empty" });
+  }
 
-    // 🧮 Global aggregates for this transaction
-    let totalPaid = 0;
-    let clubReceives = 0;
-    let platformReceives = 0;
-    let gatewayFee = 0;
-    let gatewayIVA = 0;
+  const clubId = cartItems[0].ticket.clubId;
+  const date = cartItems[0].date;
 
-    const firstClubId = cartItems[0].ticket.club.id;
-    const today = new Date().toISOString().split("T")[0];
-    const purchasesToCreate: TicketPurchase[] = [];
+  let totalPaid = 0;
+  let totalClubReceives = 0;
+  let totalPlatformReceives = 0;
+  let totalGatewayFee = 0;
+  let totalGatewayIVA = 0;
 
-    for (const item of cartItems) {
-      const { ticket, quantity, date } = item;
+  const platformFeePercentage = 0.05;
 
-      const latestTicket = await ticketRepo.findOne({
-        where: { id: ticket.id },
-        relations: ["club"],
+  let retentionICA: number | undefined;
+  let retentionIVA: number | undefined;
+  let retentionFuente: number | undefined;
+
+  const ticketPurchases: TicketPurchase[] = [];
+
+  for (const item of cartItems) {
+    const ticket = item.ticket;
+    const quantity = item.quantity;
+
+    for (let i = 0; i < quantity; i++) {
+      const basePrice = Number(ticket.price);
+      const platformFee = calculatePlatformFee(basePrice, platformFeePercentage);
+      const { totalGatewayFee: itemGatewayFee, iva } = calculateGatewayFees(basePrice);
+
+      const userPaid = basePrice + platformFee + itemGatewayFee + iva;
+      const clubReceives = basePrice;
+
+      totalPaid += userPaid;
+      totalClubReceives += clubReceives;
+      totalPlatformReceives += platformFee;
+      totalGatewayFee += itemGatewayFee;
+      totalGatewayIVA += iva;
+
+      const qrCodeEncrypted = generateFakeQR(ticket.id, date, email); // ✅ placeholder QR
+
+      const purchase = purchaseRepo.create({
+        ticketId: ticket.id,
+        userId,
+        clubId,
+        email,
+        date,
+        userPaid,
+        clubReceives,
+        platformReceives: platformFee,
+        gatewayFee: itemGatewayFee,
+        gatewayIVA: iva,
+        qrCodeEncrypted, // ✅ required
+        platformFeeApplied: platformFeePercentage,
       });
 
-      if (!latestTicket || !latestTicket.isActive) {
-        res.status(400).json({ error: `Ticket '${ticket.name}' is no longer available` });
-        return;
-      }
-
-      const platformFeeRate = 0.05;
-      const gatewayRate = 0.0299;
-      const fixedFee = 900;
-      const ivaRate = 0.19;
-
-      const platformFee = Math.round(latestTicket.price * platformFeeRate);
-      const gatewayRaw = Math.round(latestTicket.price * gatewayRate + fixedFee);
-      const gatewayIva = Math.round(gatewayRaw * ivaRate);
-      const clubNet = latestTicket.price - platformFee;
-
-      for (let i = 0; i < quantity; i++) {
-        totalPaid += latestTicket.price;
-        platformReceives += platformFee;
-        gatewayFee += gatewayRaw;
-        gatewayIVA += gatewayIva;
-        clubReceives += clubNet;
-
-        purchasesToCreate.push(
-          purchaseRepo.create({
-            ticket,
-            ticketId: latestTicket.id,
-            clubId: latestTicket.club.id,
-            date,
-            email,
-            qrCodeEncrypted: generateEncryptedQR(),
-            ...(userId ? { userId } : {}),
-            userPaid: latestTicket.price,
-            clubReceives: clubNet,
-            platformReceives: platformFee,
-            gatewayFee: gatewayRaw,
-            gatewayIVA: gatewayIva,
-            platformFeeApplied: platformFee,
-            purchaseTransactionId: "", // to be set after creating the transaction
-          })
-        );
-      }
+      ticketPurchases.push(purchase);
     }
-
-    // ✨ Create and assign the transaction
-    const transaction = transactionRepo.create({
-      userId,
-      clubId: firstClubId,
-      email,
-      date: today,
-      totalPaid,
-      clubReceives,
-      platformReceives,
-      gatewayFee,
-      gatewayIVA,
-    });
-
-    const savedTx = await transactionRepo.save(transaction);
-
-    for (const p of purchasesToCreate) {
-      p.purchaseTransactionId = savedTx.id;
-    }
-
-    await purchaseRepo.save(purchasesToCreate);
-    await cartRepo.delete(userId ? { userId } : { sessionId });
-
-    const summary = purchasesToCreate.reduce<Record<string, any>>((acc, p) => {
-      const key = `${p.ticketId}-${p.date}`;
-      if (!acc[key]) {
-        acc[key] = {
-          ticketId: p.ticketId,
-          ticketName: p.ticket.name,
-          date: p.date,
-          quantity: 0,
-          qrCodes: [],
-        };
-      }
-      acc[key].quantity += 1;
-      acc[key].qrCodes.push(p.qrCodeEncrypted);
-      return acc;
-    }, {});
-
-    res.status(201).json({
-      message: "Checkout successful",
-      transactionId: savedTx.id,
-      summary: Object.values(summary),
-    });
-  } catch (err) {
-    console.error("❌ Error during checkout:", err);
-    res.status(500).json({ error: "Internal server error" });
   }
+
+  const transactionData: Partial<PurchaseTransaction> = {
+    email,
+    clubId,
+    date,
+    totalPaid,
+    clubReceives: totalClubReceives,
+    platformReceives: totalPlatformReceives,
+    gatewayFee: totalGatewayFee,
+    gatewayIVA: totalGatewayIVA,
+    retentionICA,
+    retentionIVA,
+    retentionFuente,
+    ...(userId ? { userId } : {}),
+  };
+
+  const transaction = transactionRepo.create(transactionData);
+  await transactionRepo.save(transaction);
+
+  for (const purchase of ticketPurchases) {
+    purchase.transaction = transaction;
+  }
+
+  await purchaseRepo.save(ticketPurchases);
+  await cartRepo.delete(userId ? { userId } : { sessionId });
+
+  // await sendQREmail(email, ticketPurchases); // future
+
+  return res.json({
+    message: "Checkout completed",
+    transactionId: transaction.id,
+    totalPaid,
+    tickets: ticketPurchases.map((p) => ({
+      id: p.id,
+      ticket: p.ticket,
+      userPaid: p.userPaid,
+    })),
+  });
 };

@@ -14,7 +14,7 @@ const router = Router();
 router.get("/", getAllClubs);           // Public
 router.get("/:id", getClubById);        // Public
 
-router.post("/", authMiddleware, requireAdminAuth, createClub);
+router.post("/", authMiddleware, requireAdminAuth, createClub); // Protected
 router.put("/:id", authMiddleware, updateClub);      // Protected
 router.delete("/:id", authMiddleware, deleteClub);   // Protected
 

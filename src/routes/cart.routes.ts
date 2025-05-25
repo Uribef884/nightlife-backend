@@ -5,7 +5,6 @@ import {
   removeCartItem,
   getUserCart,
 } from "../controllers/cart.controller";
-import { authMiddleware } from "../middlewares/authMiddleware";
 
 const router = Router();
 

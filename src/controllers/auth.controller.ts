@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { User } from "../entities/User";
+import { Club } from "../entities/Club";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { isDisposableEmail } from "../utils/disposableEmailValidator";
@@ -64,6 +65,7 @@ export async function login(req: Request, res: Response): Promise<void> {
 
   const repo = AppDataSource.getRepository(User);
   const user = await repo.findOneBy({ email });
+
   if (!user) {
     res.status(401).json({ error: "Invalid credentials" });
     return;
@@ -75,17 +77,33 @@ export async function login(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // ✅ Clear any anonymous cart + session cookie
+  // ✅ Clear anonymous cart
   const sessionId = req.cookies?.sessionId;
   if (sessionId) {
     await clearAnonymousCart(sessionId);
     res.clearCookie("sessionId");
-    (req as any).sessionId = undefined; // prevent this request from using stale sessionId
+    (req as any).sessionId = undefined;
   }
 
-  const token = jwt.sign({ id: user.id, role: user.role, email: user.email }, JWT_SECRET, {
-    expiresIn: "7d",
-  });
+  // ✅ Get clubId if user is a clubowner
+  let clubId: string | undefined = undefined;
+  if (user.role === "clubowner") {
+    const club = await AppDataSource.getRepository(Club).findOneBy({ ownerId: user.id });
+    if (club) {
+      clubId = club.id;
+    }
+  }
+
+  const token = jwt.sign(
+    {
+      id: user.id,
+      role: user.role,
+      email: user.email,
+      ...(clubId ? { clubId } : {}),
+    },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
 
   res.cookie("token", token, {
     httpOnly: true,
@@ -96,7 +114,12 @@ export async function login(req: Request, res: Response): Promise<void> {
 
   res.json({
     message: "Login successful",
-    user: { id: user.id, email: user.email, role: user.role },
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      ...(clubId ? { clubId } : {}),
+    },
   });
 }
 

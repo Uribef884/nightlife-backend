@@ -5,7 +5,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
-  OneToMany
+  OneToMany,
 } from "typeorm";
 import { Club } from "./Club";
 import { CartItem } from "./CartItem";
@@ -45,7 +45,9 @@ export class Ticket {
   @UpdateDateColumn()
   updatedAt!: Date;
 
+  @Column() // 👈 ADDED this line
+  clubId!: string;
+
   @ManyToOne(() => Club, (club) => club.tickets, { onDelete: "CASCADE" })
   club!: Club;
-
 }

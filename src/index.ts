@@ -8,12 +8,11 @@ import clubRoutes from "./routes/club.routes";
 import ticketRoutes from "./routes/ticket.routes";
 import authRoutes from "./routes/auth.routes";
 import cookieParser from "cookie-parser";
-import orderRoutes from "./routes/order.routes";
-import { authMiddleware } from "./middlewares/authMiddleware";
 import bouncerRoutes from "./routes/bouncer.routes";
 import cartRoutes from "./routes/cart.routes";
 import { attachSessionId } from "./middlewares/sessionMiddleware";
 import checkoutRoutes from "./routes/checkout.routes";
+import purchaseRoutes from "./routes/purchases.routes";
 
 dotenv.config();
 
@@ -33,10 +32,10 @@ app.use(helmet());
 app.use("/auth", authRoutes);
 app.use("/clubs", clubRoutes);
 app.use("/tickets", ticketRoutes); // leave public access to GET endpoints
-app.use("/orders", authMiddleware, orderRoutes);
 app.use("/bouncers", bouncerRoutes);
 app.use("/cart", cartRoutes);
 app.use("/checkout", checkoutRoutes);
+app.use("/purchases", purchaseRoutes);
 
 // DB Connection + Server Start
 AppDataSource.initialize()
