@@ -71,6 +71,10 @@ async function findTransactions(where: any, role: Role, query: any): Promise<Pur
     filters.clubId = query.clubId;
   }
 
+  if (query.orderId) {
+    filters.id = query.orderId;
+  }
+
   const transactions = await txRepo.find({
     where: filters,
     relations: ["purchases", "purchases.ticket"],
