@@ -5,23 +5,22 @@ import { Ticket } from "../entities/Ticket";
 import { TicketPurchase } from "../entities/TicketPurchase";
 import { PurchaseTransaction } from "../entities/PurchaseTransaction";
 import { calculatePlatformFee, calculateGatewayFees } from "../utils/feeUtils";
-import { v4 as uuidv4 } from "uuid";
-// import { sendQREmail } from "../services/emailService"; // For future email delivery
-
-// Temporary base64 QR generator
-function generateFakeQR(ticketId: string, date: string, email: string): string {
-  return Buffer.from(`${ticketId}|${date}|${email}`).toString("base64");
-}
+import { isDisposableEmail } from "../utils/disposableEmailValidator";
+import { generateEncryptedQR } from "../utils/generateEncryptedQR";
+import { sendTicketEmail } from "../services/emailService";
 
 export const checkout = async (req: Request, res: Response) => {
-
   const userId = (req as any).user?.id ?? null;
   const sessionId = req.cookies?.sessionId ?? null;
-  
   let email: string | undefined = (req as any).user?.email ?? req.body?.email;
 
   if (!email) {
     return res.status(400).json({ error: "Email is required for checkout" });
+  }
+
+  // ❌ Block anonymous users with disposable emails
+  if (!req.user && isDisposableEmail(email)) {
+    return res.status(403).json({ error: "Disposable email domains are not allowed" });
   }
 
   const cartRepo = AppDataSource.getRepository(CartItem);
@@ -39,7 +38,7 @@ export const checkout = async (req: Request, res: Response) => {
   }
 
   const clubId = cartItems[0].ticket.clubId;
-  const date = cartItems[0].date;
+  const date = new Date(cartItems[0].date);
 
   let totalPaid = 0;
   let totalClubReceives = 0;
@@ -73,7 +72,9 @@ export const checkout = async (req: Request, res: Response) => {
       totalGatewayFee += itemGatewayFee;
       totalGatewayIVA += iva;
 
-      const qrCodeEncrypted = generateFakeQR(ticket.id, date, email); // ✅ placeholder QR
+      // ✅ Encrypt the QR payload
+      const payload = { ticketId: ticket.id, date: date.toISOString().split("T")[0], email };
+      const qrDataUrl = await generateEncryptedQR(payload);
 
       const purchase = purchaseRepo.create({
         ticketId: ticket.id,
@@ -86,11 +87,19 @@ export const checkout = async (req: Request, res: Response) => {
         platformReceives: platformFee,
         gatewayFee: itemGatewayFee,
         gatewayIVA: iva,
-        qrCodeEncrypted, // ✅ required
+        qrCodeEncrypted: Buffer.from(JSON.stringify(payload)).toString("base64"), // still stored securely
         platformFeeApplied: platformFeePercentage,
       });
 
       ticketPurchases.push(purchase);
+
+      // ✅ Send email with embedded QR
+      await sendTicketEmail({
+        email,
+        ticketName: ticket.name,
+        date: date.toISOString().split("T")[0],
+        qrDataUrl,
+      });
     }
   }
 
@@ -118,8 +127,6 @@ export const checkout = async (req: Request, res: Response) => {
 
   await purchaseRepo.save(ticketPurchases);
   await cartRepo.delete(userId ? { userId } : { sessionId });
-
-  // await sendQREmail(email, ticketPurchases); // future
 
   return res.json({
     message: "Checkout completed",

@@ -10,21 +10,26 @@ import {
   getClubPurchases,
   getClubPurchaseById,
   getAllPurchasesAdmin,
-  getPurchaseByIdAdmin
+  getPurchaseByIdAdmin,
+  validateTicketQR
 } from "../controllers/purchases.controller";
+import { requireValidatorAccess } from "../middlewares/requireValidatorAccess";
 
 const router = Router();
 
-// 🏢 Club owners only — must go before :id
+// ✅ QR Validation — must go before `/:id`
+router.patch("/:id/validate", authMiddleware, requireValidatorAccess, validateTicketQR);
+
+// 🏢 Club owners
 router.get("/club", authMiddleware, requireClubOwnerOrAdmin, getClubPurchases);
 router.get("/club/:id", authMiddleware, requireClubOwnerOrAdmin, getClubPurchaseById);
 
-// 🛡 Admins only — must go before :id
+// 🛡 Admins
 router.get("/admin", authMiddleware, requireAdminAuth, getAllPurchasesAdmin);
 router.get("/admin/:id", authMiddleware, requireAdminAuth, getPurchaseByIdAdmin);
 
-// 🧑 Regular users (must be authenticated)
+// 🧑 Regular users
 router.get("/", authMiddleware, getUserPurchases);
-router.get("/:id", authMiddleware, getUserPurchaseById); // last: matches UUIDs only
+router.get("/:id", authMiddleware, getUserPurchaseById); // ❗️Always last
 
 export default router;

@@ -85,15 +85,19 @@ export async function login(req: Request, res: Response): Promise<void> {
     (req as any).sessionId = undefined;
   }
 
-  // ✅ Get clubId if user is a clubowner
+  // ✅ Assign clubId based on role
   let clubId: string | undefined = undefined;
+
   if (user.role === "clubowner") {
     const club = await AppDataSource.getRepository(Club).findOneBy({ ownerId: user.id });
     if (club) {
       clubId = club.id;
     }
+  } else if (user.role === "bouncer") {
+    clubId = user.clubId;
   }
 
+  // ✅ Sign JWT with clubId if present
   const token = jwt.sign(
     {
       id: user.id,

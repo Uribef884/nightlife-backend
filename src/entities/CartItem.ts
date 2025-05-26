@@ -23,8 +23,8 @@ export class CartItem {
   @Column()
   ticketId!: string;
 
-  @Column()
-  date!: string;
+  @Column({ type: 'date' }) 
+  date!: Date;
 
   @Column()
   quantity!: number;

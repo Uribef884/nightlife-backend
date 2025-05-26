@@ -22,8 +22,8 @@ export class PurchaseTransaction {
   @Column()
   email!: string; // ✅ DO NOT leave optional — must be defined
 
-  @Column()
-  date!: string;
+  @Column({ type: 'date' })
+  date!: Date;
 
   @Column("numeric")
   totalPaid!: number;

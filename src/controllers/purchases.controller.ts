@@ -1,8 +1,10 @@
 import { Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { PurchaseTransaction } from "../entities/PurchaseTransaction";
+import { TicketPurchase } from "../entities/TicketPurchase";
 import { ILike, Between } from "typeorm";
 import { AuthenticatedRequest } from "../types/express";
+import { startOfDay, endOfDay} from "date-fns";
 import type { JwtPayload } from "../types/jwt";
 
 type Role = JwtPayload["role"];
@@ -147,6 +149,55 @@ export const getClubPurchaseById = async (req: AuthenticatedRequest, res: Respon
   }
 
   res.json(formatTransaction(tx, "clubowner"));
+};
+
+export const validateTicketQR = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const id = req.params.id;
+  const user = req.user!;
+
+  if (user.role === "admin" || !user.clubId) {
+    res.status(403).json({ error: "Forbidden: You do not have access to validate this QR" });
+    return;
+  }
+
+  const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
+  const ticket = await purchaseRepo.findOneBy({ id });
+
+  if (!ticket) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+
+  // ✅ Only allow validation if same club
+  if (ticket.clubId !== user.clubId) {
+    res.status(403).json({ error: "You cannot validate purchases from other clubs" });
+    return;
+  }
+
+  // ✅ Ticket can only be used on the correct date (local time-safe)
+  const ticketDate = new Date(ticket.date).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (ticketDate !== today) {
+    res.status(400).json({ error: "This ticket is not valid today" });
+    return;
+  }
+
+  // ❌ Reuse is not allowed at all
+  if (ticket.isUsed) {
+    res.status(400).json({ error: "This ticket has already been used and cannot be reused." });
+    return;
+  }
+
+  // ✅ Mark ticket as used
+  ticket.isUsed = true;
+  ticket.usedAt = new Date();
+  await purchaseRepo.save(ticket);
+
+  res.json({
+    message: "Ticket successfully marked as used",
+    usedAt: ticket.usedAt,
+  });
 };
 
 // 🛡 Admin

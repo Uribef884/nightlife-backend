@@ -38,8 +38,8 @@ export class TicketPurchase {
   @Column()
   clubId!: string;
 
-  @Column()
-  date!: string;
+  @Column({ type: 'date' })
+  date!: Date;
 
   @Column({ nullable: true })
   buyerName?: string;
