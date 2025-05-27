@@ -8,29 +8,34 @@ import { calculatePlatformFee, calculateGatewayFees } from "../utils/feeUtils";
 import { isDisposableEmail } from "../utils/disposableEmailValidator";
 import { generateEncryptedQR } from "../utils/generateEncryptedQR";
 import { sendTicketEmail } from "../services/emailService";
+import { mockValidateWompiTransaction } from "../services/mockWompiService";
 
-export const checkout = async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id ?? null;
-  const sessionId = req.cookies?.sessionId ?? null;
-  let email: string | undefined = (req as any).user?.email ?? req.body?.email;
-
-  if (!email) {
-    return res.status(400).json({ error: "Email is required for checkout" });
-  }
-
-  // ❌ Block anonymous users with disposable emails
-  if (!req.user && isDisposableEmail(email)) {
-    return res.status(403).json({ error: "Disposable email domains are not allowed" });
-  }
-
+export const processSuccessfulCheckout = async ({
+  userId,
+  sessionId,
+  email,
+  req,
+  res,
+  transactionId, // ✅ optional transactionId passed in
+}: {
+  userId: string | null;
+  sessionId: string | null;
+  email: string;
+  req: Request;
+  res: Response;
+  transactionId?: string;
+}): Promise<Response> => {
   const cartRepo = AppDataSource.getRepository(CartItem);
   const ticketRepo = AppDataSource.getRepository(Ticket);
   const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
   const transactionRepo = AppDataSource.getRepository(PurchaseTransaction);
 
+  const where = userId !== null ? { userId } : sessionId !== null ? { sessionId } : undefined;
+  if (!where) return res.status(400).json({ error: "Missing session or user" });
+
   const cartItems = await cartRepo.find({
-    where: userId ? { userId } : { sessionId },
-    relations: ["ticket"],
+    where,
+    relations: ["ticket", "ticket.club"],
   });
 
   if (!cartItems.length) {
@@ -47,12 +52,12 @@ export const checkout = async (req: Request, res: Response) => {
   let totalGatewayIVA = 0;
 
   const platformFeePercentage = 0.05;
-
   let retentionICA: number | undefined;
   let retentionIVA: number | undefined;
   let retentionFuente: number | undefined;
 
   const ticketPurchases: TicketPurchase[] = [];
+  const emailTasks: Promise<void>[] = [];
 
   for (const item of cartItems) {
     const ticket = item.ticket;
@@ -72,13 +77,17 @@ export const checkout = async (req: Request, res: Response) => {
       totalGatewayFee += itemGatewayFee;
       totalGatewayIVA += iva;
 
-      // ✅ Encrypt the QR payload
-      const payload = { ticketId: ticket.id, date: date.toISOString().split("T")[0], email };
+      const payload = {
+        ticketId: ticket.id,
+        date: date.toISOString().split("T")[0],
+        email,
+      };
+
       const qrDataUrl = await generateEncryptedQR(payload);
 
       const purchase = purchaseRepo.create({
-        ticketId: ticket.id,
-        userId,
+        ticketId: ticket.id as string,
+        userId: userId ?? undefined,
         clubId,
         email,
         date,
@@ -87,19 +96,38 @@ export const checkout = async (req: Request, res: Response) => {
         platformReceives: platformFee,
         gatewayFee: itemGatewayFee,
         gatewayIVA: iva,
-        qrCodeEncrypted: Buffer.from(JSON.stringify(payload)).toString("base64"), // still stored securely
+        qrCodeEncrypted: Buffer.from(JSON.stringify(payload)).toString("base64"),
         platformFeeApplied: platformFeePercentage,
       });
 
       ticketPurchases.push(purchase);
 
-      // ✅ Send email with embedded QR
-      await sendTicketEmail({
-        email,
-        ticketName: ticket.name,
-        date: date.toISOString().split("T")[0],
-        qrDataUrl,
-      });
+      emailTasks.push(
+        (async () => {
+          try {
+            await sendTicketEmail({
+              to: email,
+              ticketName: ticket.name,
+              date: payload.date,
+              qrImageDataUrl: qrDataUrl,
+              clubName: ticket.club?.name || "Your Club",
+            });
+          } catch (err) {
+            console.warn(`[EMAIL ❌] Failed to send ticket ${i + 1}, retrying...`);
+            try {
+              await sendTicketEmail({
+                to: email,
+                ticketName: ticket.name,
+                date: payload.date,
+                qrImageDataUrl: qrDataUrl,
+                clubName: ticket.club?.name || "Your Club",
+              });
+            } catch (retryErr) {
+              console.error(`[EMAIL ❌] Retry failed for ticket ${i + 1}:`, retryErr);
+            }
+          }
+        })()
+      );
     }
   }
 
@@ -116,6 +144,13 @@ export const checkout = async (req: Request, res: Response) => {
     retentionIVA,
     retentionFuente,
     ...(userId ? { userId } : {}),
+    ...(transactionId
+      ? {
+          paymentProviderTransactionId: transactionId,
+          paymentProvider: "mock",
+          paymentStatus: "APPROVED",
+        }
+      : {}),
   };
 
   const transaction = transactionRepo.create(transactionData);
@@ -126,7 +161,14 @@ export const checkout = async (req: Request, res: Response) => {
   }
 
   await purchaseRepo.save(ticketPurchases);
-  await cartRepo.delete(userId ? { userId } : { sessionId });
+
+  if (userId) {
+    await cartRepo.delete({ userId });
+  } else if (sessionId) {
+    await cartRepo.delete({ sessionId });
+  }
+
+  await Promise.all(emailTasks);
 
   return res.json({
     message: "Checkout completed",
@@ -137,5 +179,46 @@ export const checkout = async (req: Request, res: Response) => {
       ticket: p.ticket,
       userPaid: p.userPaid,
     })),
+  });
+};
+
+export const checkout = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id ?? null;
+  const sessionId = req.cookies?.sessionId ?? null;
+  const email: string | undefined = (req as any).user?.email ?? req.body?.email;
+
+  if (!email) {
+    return res.status(400).json({ error: "Email is required for checkout" });
+  }
+
+  if (!req.user && isDisposableEmail(email)) {
+    return res.status(403).json({ error: "Disposable email domains are not allowed" });
+  }
+
+  return await processSuccessfulCheckout({ userId, sessionId, email, req, res });
+};
+
+export const confirmMockCheckout = async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id ?? null;
+  const sessionId = req.cookies?.sessionId ?? null;
+  const email: string | undefined = (req as any).user?.email ?? req.body?.email;
+  const transactionId = req.body.transactionId;
+
+  if (!email || !transactionId) {
+    return res.status(400).json({ error: "Missing email or transaction ID" });
+  }
+
+  const wompiResponse = await mockValidateWompiTransaction(transactionId);
+  if (!wompiResponse.approved) {
+    return res.status(400).json({ error: "Mock transaction not approved" });
+  }
+
+  return await processSuccessfulCheckout({
+    userId,
+    sessionId,
+    email,
+    req,
+    res,
+    transactionId,
   });
 };

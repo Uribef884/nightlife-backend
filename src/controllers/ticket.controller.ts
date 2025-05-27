@@ -4,6 +4,7 @@ import { Ticket } from "../entities/Ticket";
 import { Club } from "../entities/Club";
 import { AuthenticatedRequest } from "../types/express";
 
+// ✅ CREATE TICKET
 export async function createTicket(req: Request, res: Response): Promise<void> {
   try {
     const user = req.user;
@@ -23,12 +24,32 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       priority,
       isActive,
       availableDates,
-      clubId // Optional: only admin should use this
+      quantity,
+      clubId
     } = req.body;
 
     if (!name || price == null || !maxPerPerson || !priority) {
       res.status(400).json({ error: "Missing required fields" });
       return;
+    }
+
+    if (price < 0) {
+      res.status(400).json({ error: "Price must be zero or positive" });
+      return;
+    }
+
+    const isFree = price === 0;
+
+    if (isFree) {
+      if (!availableDates || !Array.isArray(availableDates) || availableDates.length === 0) {
+        res.status(400).json({ error: "Free tickets must include availableDates" });
+        return;
+      }
+
+      if (quantity == null || quantity <= 0) {
+        res.status(400).json({ error: "Free tickets must include a positive quantity" });
+        return;
+      }
     }
 
     let club: Club | null = null;
@@ -38,21 +59,13 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
         res.status(400).json({ error: "Admin must specify clubId" });
         return;
       }
-
-      club = await clubRepo.findOne({
-        where: { id: clubId },
-        relations: ["owner"]
-      });
-
+      club = await clubRepo.findOne({ where: { id: clubId }, relations: ["owner"] });
       if (!club) {
         res.status(404).json({ error: "Club not found" });
         return;
       }
     } else if (user.role === "clubowner") {
-      club = await clubRepo.findOne({
-        where: { owner: { id: user.id } },
-      });
-
+      club = await clubRepo.findOne({ where: { owner: { id: user.id } } });
       if (!club) {
         res.status(403).json({ error: "You do not own a club" });
         return;
@@ -70,6 +83,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       priority: Math.max(1, priority),
       isActive: isActive ?? true,
       availableDates,
+      quantity,
       club,
     });
 
@@ -81,23 +95,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
   }
 }
 
-export async function getTicketsByClub(req: Request, res: Response): Promise<void> {
-  try {
-    const { id } = req.params;
-    const repo = AppDataSource.getRepository(Ticket);
-
-    const tickets = await repo.find({
-      where: { club: { id } },
-      order: { priority: "ASC" }
-    });
-
-    res.json(tickets);
-  } catch (error) {
-    console.error("❌ Error fetching tickets:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-}
-
+// ✅ GET ALL TICKETS
 export async function getAllTickets(req: Request, res: Response): Promise<void> {
   try {
     const repo = AppDataSource.getRepository(Ticket);
@@ -107,6 +105,76 @@ export async function getAllTickets(req: Request, res: Response): Promise<void> 
       order: { priority: "ASC" },
     });
 
+    const today = new Date().toISOString().split("T")[0];
+
+    for (const ticket of tickets) {
+      if (
+        ticket.availableDates?.length &&
+        ticket.availableDates.every((d) => d < today) &&
+        ticket.isActive
+      ) {
+        ticket.isActive = false;
+        await repo.save(ticket);
+      }
+    }
+
+    res.json(tickets);
+  } catch (error) {
+    console.error("❌ Error fetching tickets:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+// ✅ UPDATE TICKET
+export const updateTicket = async (req: Request, res: Response): Promise<void> => {
+  const user = req.user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const { id } = req.params;
+  const updates = req.body;
+
+  const ticketRepo = AppDataSource.getRepository(Ticket);
+  const ticket = await ticketRepo.findOne({
+    where: { id },
+    relations: ["club", "club.owner"],
+  });
+
+  if (!ticket) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+
+  if (user.role === "clubowner" && ticket.club.ownerId !== user.id) {
+    res.status(403).json({ error: "You are not authorized to update this ticket" });
+    return;
+  }
+
+  if ("price" in updates) {
+    const newPrice = Number(updates.price);
+    if (isNaN(newPrice) || newPrice < 0) {
+       res.status(400).json({ error: "Price must be a non-negative number" });
+       return
+    }
+    if (ticket.price !== 0 && newPrice === 0) {
+       res.status(400).json({ error: "You cannot change a paid ticket to free" });
+       return
+    }
+  }
+
+  Object.assign(ticket, updates);
+  await ticketRepo.save(ticket);
+  res.json({ message: "Ticket updated successfully", ticket });
+};
+
+// ✅ REMAINING ROUTES (unchanged)
+export async function getTicketsByClub(req: Request, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+    const repo = AppDataSource.getRepository(Ticket);
+    const tickets = await repo.find({ where: { club: { id } }, order: { priority: "ASC" } });
     res.json(tickets);
   } catch (error) {
     console.error("❌ Error fetching tickets:", error);
@@ -125,10 +193,7 @@ export async function getTicketById(req: AuthenticatedRequest, res: Response): P
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const { id } = req.params;
 
-    const ticket = await ticketRepo.findOne({
-      where: { id },
-      relations: ["club"],
-    });
+    const ticket = await ticketRepo.findOne({ where: { id }, relations: ["club"] });
 
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
@@ -157,11 +222,7 @@ export async function deleteTicket(req: Request, res: Response): Promise<void> {
 
     const { id } = req.params;
     const repo = AppDataSource.getRepository(Ticket);
-
-    const ticket = await repo.findOne({
-      where: { id },
-      relations: ["club", "club.owner"],
-    });
+    const ticket = await repo.findOne({ where: { id }, relations: ["club", "club.owner"] });
 
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
@@ -192,10 +253,7 @@ export const toggleTicketVisibility = async (req: Request, res: Response): Promi
     const { id } = req.params;
     const repo = AppDataSource.getRepository(Ticket);
 
-    const ticket = await repo.findOne({
-      where: { id },
-      relations: ["club", "club.owner"],
-    });
+    const ticket = await repo.findOne({ where: { id }, relations: ["club", "club.owner"] });
 
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
@@ -217,52 +275,9 @@ export const toggleTicketVisibility = async (req: Request, res: Response): Promi
   }
 };
 
-export const updateTicket = async (req: Request, res: Response): Promise<void> => {
-  const user = req.user;
-  if (!user) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
-  const { id } = req.params;
-  const updates = req.body;
-
-  const ticketRepo = AppDataSource.getRepository(Ticket);
-  const ticket = await ticketRepo.findOne({
-    where: { id },
-    relations: ["club", "club.owner"],
-  });
-
-  if (!ticket) {
-    res.status(404).json({ error: "Ticket not found" });
-    return;
-  }
-
-  if (user.role === "clubowner" && ticket.club.ownerId !== user.id) {
-    res.status(403).json({ error: "You are not authorized to update this ticket" });
-    return;
-  }
-
-  if ('price' in updates && (typeof updates.price !== 'number' || updates.price < 0)) {
-    res.status(400).json({ error: "Price must be a non-negative number" });
-    return;
-  }
-
-  if ('name' in updates && typeof updates.name !== 'string') {
-    res.status(400).json({ error: "Name must be a string" });
-    return;
-  }
-
-  Object.assign(ticket, updates);
-  await ticketRepo.save(ticket);
-
-  res.json({ message: "Ticket updated successfully", ticket });
-};
-
 export const getTicketsForMyClub = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user;
-
     if (!user || user.role !== "clubowner") {
       res.status(403).json({ error: "Forbidden: Only clubowners can access this" });
       return;
@@ -271,12 +286,9 @@ export const getTicketsForMyClub = async (req: AuthenticatedRequest, res: Respon
     const clubRepo = AppDataSource.getRepository(Club);
     const ticketRepo = AppDataSource.getRepository(Ticket);
 
-    const club = await clubRepo.findOne({
-      where: { ownerId: user.id },
-    });
+    const club = await clubRepo.findOne({ where: { ownerId: user.id } });
 
     if (!club) {
-      console.error("❌ No club found for user:", user.id);
       res.status(404).json({ error: "Club not found for this user" });
       return;
     }

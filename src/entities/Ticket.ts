@@ -39,13 +39,16 @@ export class Ticket {
   @Column("date", { array: true, nullable: true })
   availableDates?: string[];
 
+  @Column("int", { nullable: true })
+  quantity?: number; // ✅ New field for free ticket availability
+
   @CreateDateColumn()
   createdAt!: Date;
 
   @UpdateDateColumn()
   updatedAt!: Date;
 
-  @Column() // 👈 ADDED this line
+  @Column()
   clubId!: string;
 
   @ManyToOne(() => Club, (club) => club.tickets, { onDelete: "CASCADE" })

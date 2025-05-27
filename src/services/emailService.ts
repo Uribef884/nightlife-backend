@@ -1,42 +1,39 @@
-// src/services/emailService.ts
 import nodemailer from "nodemailer";
 import { generateTicketEmailHTML } from "../templates/ticketEmailTemplate";
+
+// Define a reusable type for the ticket email payload
+type TicketEmailPayload = {
+  to: string;
+  ticketName: string;
+  date: string;
+  qrImageDataUrl: string;
+  clubName: string;
+};
 
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT),
-  secure: true,
+  secure: false,
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
 });
 
-export async function sendTicketEmail({
-  to,
-  ticketName,
-  date,
-  qrImageDataUrl,
-  clubName,
-}: {
-  to: string;
-  ticketName: string;
-  date: string;
-  qrImageDataUrl: string;
-  clubName: string;
-}) {
+/**
+ * Sends a styled ticket email with QR code to the user.
+ * @param payload - TicketEmailPayload including recipient and ticket details
+ */
+export async function sendTicketEmail(payload: TicketEmailPayload) {
   const html = generateTicketEmailHTML({
-    ticketName,
-    date,
-    email: to,
-    qrImageDataUrl,
-    clubName,
+    ...payload,
+    email: payload.to, // Used inside the HTML template
   });
 
   await transporter.sendMail({
     from: `"NightLife Tickets" <${process.env.SMTP_USER}>`,
-    to,
-    subject: `🎟️ Your Ticket for ${ticketName}`,
+    to: payload.to,
+    subject: `🎟️ Your Ticket for ${payload.ticketName}`,
     html,
   });
 }

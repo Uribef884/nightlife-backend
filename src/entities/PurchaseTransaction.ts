@@ -49,6 +49,15 @@ export class PurchaseTransaction {
   @Column("numeric", { nullable: true })
   retentionFuente?: number;
 
+  @Column({ nullable: true, unique: true })
+  paymentProviderTransactionId?: string; // Wompi or mock_txn_xxxx
+
+  @Column({ default: "mock" })
+  paymentProvider!: "mock" | "wompi";
+
+  @Column({ default: "APPROVED" })
+  paymentStatus!: "APPROVED" | "DECLINED" | "PENDING";
+
   @CreateDateColumn()
   createdAt!: Date;
 
@@ -57,4 +66,5 @@ export class PurchaseTransaction {
 
   @OneToMany(() => TicketPurchase, (purchase) => purchase.transaction)
   purchases!: TicketPurchase[];
+
 }

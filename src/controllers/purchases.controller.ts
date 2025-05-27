@@ -155,8 +155,16 @@ export const validateTicketQR = async (req: AuthenticatedRequest, res: Response)
   const id = req.params.id;
   const user = req.user!;
 
+  // 🛡 Only bouncers or clubowners (not admin, not outsiders)
   if (user.role === "admin" || !user.clubId) {
     res.status(403).json({ error: "Forbidden: You do not have access to validate this QR" });
+    return;
+  }
+
+  // ✅ Require explicit POST body confirmation
+  const { confirm } = req.body;
+  if (confirm !== true) {
+    res.status(400).json({ error: "Validation must be explicitly confirmed" });
     return;
   }
 
@@ -168,34 +176,33 @@ export const validateTicketQR = async (req: AuthenticatedRequest, res: Response)
     return;
   }
 
-  // ✅ Only allow validation if same club
+  // 🛡 Club isolation
   if (ticket.clubId !== user.clubId) {
     res.status(403).json({ error: "You cannot validate purchases from other clubs" });
     return;
   }
 
-  // ✅ Ticket can only be used on the correct date (local time-safe)
+  // 📅 Date check
   const ticketDate = new Date(ticket.date).toISOString().slice(0, 10);
   const today = new Date().toISOString().slice(0, 10);
-
   if (ticketDate !== today) {
     res.status(400).json({ error: "This ticket is not valid today" });
     return;
   }
 
-  // ❌ Reuse is not allowed at all
+  // 🔁 One-time use only
   if (ticket.isUsed) {
     res.status(400).json({ error: "This ticket has already been used and cannot be reused." });
     return;
   }
 
-  // ✅ Mark ticket as used
+  // ✅ Mark as used — irreversible
   ticket.isUsed = true;
   ticket.usedAt = new Date();
   await purchaseRepo.save(ticket);
 
   res.json({
-    message: "Ticket successfully marked as used",
+    message: "✅ Ticket successfully marked as used",
     usedAt: ticket.usedAt,
   });
 };
