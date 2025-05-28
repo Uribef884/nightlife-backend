@@ -4,6 +4,7 @@ import {
   confirmMockCheckout,
 } from "../controllers/checkout.controller";
 import { authMiddleware } from "../middlewares/authMiddleware";
+import { optionalAuthMiddleware } from "../middlewares/optionalAuthMiddleware";
 import { initiateMockCheckout } from "../controllers/initiate.controller"; // rememeber to switch and delete everything related to mock checkout
 const router = Router();
 
@@ -18,7 +19,7 @@ router.post("/", async (req, res) => {
 });
 
 // 🧪 Step 1 – Initiate mock Wompi checkout (price calculation)
-router.post("/initiate", authMiddleware, async (req, res) => {
+router.post("/initiate", optionalAuthMiddleware, async (req, res) => {
   try {
     await initiateMockCheckout(req, res);
   } catch (err) {

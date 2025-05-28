@@ -36,11 +36,11 @@ export class Ticket {
   @Column({ default: true })
   isActive!: boolean;
 
-  @Column("date", { array: true, nullable: true })
-  availableDates?: string[];
+  @Column({ type: "date", nullable: true })
+  availableDate?: Date; // 
 
   @Column("int", { nullable: true })
-  quantity?: number; // ✅ New field for free ticket availability
+  quantity?: number; 
 
   @CreateDateColumn()
   createdAt!: Date;
@@ -50,6 +50,12 @@ export class Ticket {
 
   @Column()
   clubId!: string;
+
+  @Column({ default: false })
+  isRecurrentEvent!: boolean;
+
+  @Column("int", { nullable: true })
+  originalQuantity?: number;
 
   @ManyToOne(() => Club, (club) => club.tickets, { onDelete: "CASCADE" })
   club!: Club;

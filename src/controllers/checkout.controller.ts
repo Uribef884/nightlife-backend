@@ -16,7 +16,7 @@ export const processSuccessfulCheckout = async ({
   email,
   req,
   res,
-  transactionId, // ✅ optional transactionId passed in
+  transactionId,
 }: {
   userId: string | null;
   sessionId: string | null;
@@ -63,6 +63,18 @@ export const processSuccessfulCheckout = async ({
     const ticket = item.ticket;
     const quantity = item.quantity;
 
+    // ✅ If quantity is set → reduce stock
+    if (ticket.quantity != null) {
+      const updatedTicket = await ticketRepo.findOneByOrFail({ id: ticket.id });
+
+      if (updatedTicket.quantity! < quantity) {
+        return res.status(400).json({ error: `Not enough tickets left for ${ticket.name}` });
+      }
+
+      updatedTicket.quantity! -= quantity;
+      await ticketRepo.save(updatedTicket);
+    }
+
     for (let i = 0; i < quantity; i++) {
       const basePrice = Number(ticket.price);
       const platformFee = calculatePlatformFee(basePrice, platformFeePercentage);
@@ -103,7 +115,14 @@ export const processSuccessfulCheckout = async ({
       ticketPurchases.push(purchase);
 
       emailTasks.push(
-        (async () => {
+        sendTicketEmail({
+          to: email,
+          ticketName: ticket.name,
+          date: payload.date,
+          qrImageDataUrl: qrDataUrl,
+          clubName: ticket.club?.name || "Your Club",
+        }).catch(async (err) => {
+          console.warn(`[EMAIL ❌] Failed to send ticket ${i + 1}, retrying...`);
           try {
             await sendTicketEmail({
               to: email,
@@ -112,21 +131,10 @@ export const processSuccessfulCheckout = async ({
               qrImageDataUrl: qrDataUrl,
               clubName: ticket.club?.name || "Your Club",
             });
-          } catch (err) {
-            console.warn(`[EMAIL ❌] Failed to send ticket ${i + 1}, retrying...`);
-            try {
-              await sendTicketEmail({
-                to: email,
-                ticketName: ticket.name,
-                date: payload.date,
-                qrImageDataUrl: qrDataUrl,
-                clubName: ticket.club?.name || "Your Club",
-              });
-            } catch (retryErr) {
-              console.error(`[EMAIL ❌] Retry failed for ticket ${i + 1}:`, retryErr);
-            }
+          } catch (retryErr) {
+            console.error(`[EMAIL ❌] Retry failed for ticket ${i + 1}:`, retryErr);
           }
-        })()
+        })
       );
     }
   }
@@ -162,6 +170,7 @@ export const processSuccessfulCheckout = async ({
 
   await purchaseRepo.save(ticketPurchases);
 
+  // 🧹 Clear cart
   if (userId) {
     await cartRepo.delete({ userId });
   } else if (sessionId) {

@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { CartItem } from "../entities/CartItem";
 import { calculatePlatformFee, calculateGatewayFees } from "../utils/feeUtils";
-import { v4 as uuidv4 } from "uuid";
+import { issueMockTransaction } from "../services/mockWompiService"; // ✅ Import correct method
 
 export const initiateMockCheckout = async (req: Request, res: Response) => {
   const userId = (req as any).user?.id ?? null;
@@ -36,7 +36,7 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
     total += finalPerUnit * item.quantity;
   }
 
-  const reference = `mock_txn_${uuidv4()}`;
+  const reference = issueMockTransaction(); // ✅ Store ID in memory so confirm step works
 
   return res.json({
     amountInCents: Math.round(total * 100),

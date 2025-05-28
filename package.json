@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "ts-node-dev --respawn src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "refresh-recurring": "ts-node src/scripts/refreshRecurringTickets.ts",
+    "auto-deactivate": "ts-node src/scripts/autoDeactivateTickets.ts"
   },
   "keywords": [],
   "author": "",

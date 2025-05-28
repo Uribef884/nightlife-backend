@@ -25,13 +25,11 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       return;
     }
 
+    // ✅ Use local date object comparison to avoid UTC shift errors
     const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, "0");
-    const dd = String(today.getDate()).padStart(2, "0");
-    const todayStr = `${yyyy}-${mm}-${dd}`;
-
-    if (date < todayStr) {
+    today.setHours(0, 0, 0, 0);
+    const selectedDate = new Date(`${date}T00:00:00`);
+    if (selectedDate < today) {
       res.status(400).json({ error: "Cannot select a past date" });
       return;
     }
@@ -39,42 +37,54 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const cartRepo = AppDataSource.getRepository(CartItem);
 
-    const ticket = await ticketRepo.findOne({ where: { id: ticketId }, relations: ["club"] });
+    const ticket = await ticketRepo.findOne({
+      where: { id: ticketId },
+      relations: ["club"],
+    });
+
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
       return;
     }
 
-    // ✅ Only enforce 3-week rule if no availableDates
-    const maxDate = new Date(today);
-    maxDate.setDate(maxDate.getDate() + 21);
-    const maxStr = `${maxDate.getFullYear()}-${String(maxDate.getMonth() + 1).padStart(2, "0")}-${String(maxDate.getDate()).padStart(2, "0")}`;
+    const isFree = ticket.price === 0;
+    const ticketDate =
+    ticket.availableDate instanceof Date
+    ? ticket.availableDate.toISOString().split("T")[0]
+    : new Date(ticket.availableDate!).toISOString().split("T")[0];
 
-    if ((!ticket.availableDates || ticket.availableDates.length === 0) && date > maxStr) {
-      res.status(400).json({ error: "You can only select dates within 3 weeks" });
-      return;
-    }
-
-    // ✅ Validate availableDates or fallback to club openDays
-    const clubOpenDays = ticket.club.openDays || [];
-    if (ticket.availableDates && ticket.availableDates.length > 0) {
-      const normalizedAvailableDates = ticket.availableDates.map(d =>
-        new Date(d).toISOString().split("T")[0]
-      );
-      if (!normalizedAvailableDates.includes(date)) {
-        res.status(400).json({ error: "This ticket is not available on the selected date" });
+    if (isFree) {
+      if (!ticket.availableDate) {
+        res.status(400).json({ error: "This free ticket has no date assigned" });
+        return;
+      }
+      if (date !== ticketDate) {
+        res.status(400).json({ error: "This free ticket is only valid on its available date" });
         return;
       }
     } else {
-      const selectedDay = new Date(`${date}T12:00:00`).toLocaleString("en-US", { weekday: "long" });
-      if (!clubOpenDays.includes(selectedDay)) {
-        res.status(400).json({ error: `This club is not open on ${selectedDay}` });
+      if (!ticket.availableDate) {
+        const maxDate = new Date();
+        maxDate.setDate(maxDate.getDate() + 21);
+        const maxStr = maxDate.toISOString().split("T")[0];
+        if (date > maxStr) {
+          res.status(400).json({ error: "You can only select dates within 3 weeks" });
+          return;
+        }
+
+        const clubOpenDays = ticket.club.openDays || [];
+        const selectedDay = new Date(`${date}T12:00:00`).toLocaleString("en-US", { weekday: "long" });
+        if (!clubOpenDays.includes(selectedDay)) {
+          res.status(400).json({ error: `This club is not open on ${selectedDay}` });
+          return;
+        }
+      } else if (ticketDate !== date) {
+        res.status(400).json({ error: "This ticket is not available on that date" });
         return;
       }
     }
 
     const whereClause = userId ? { userId } : { sessionId };
-
     const existingItems = await cartRepo.find({
       where: whereClause,
       relations: ["ticket", "ticket.club"],
@@ -92,6 +102,20 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
         error: `You can only buy up to ${ticket.maxPerPerson} tickets of this type`,
       });
       return;
+    }
+
+    // ✅ Check against remaining stock if quantity is set
+    if (ticket.quantity != null) {
+      const totalCartQuantity = existingItems
+        .filter(item => item.ticket.id === ticketId && item.date === date)
+        .reduce((sum, item) => sum + item.quantity, 0);
+
+      if (totalCartQuantity + quantity > ticket.quantity) {
+        res.status(400).json({
+          error: `Only ${ticket.quantity - totalCartQuantity} tickets are available`,
+        });
+        return;
+      }
     }
 
     if (existingItems.length > 0) {
@@ -116,12 +140,6 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       existing.quantity += quantity;
       await cartRepo.save(existing);
       res.status(200).json(existing);
-      return;
-    }
-
-    // 🔒 FINAL CHECK: enforce ownership
-    if (!userId && !sessionId) {
-      res.status(400).json({ error: "Could not determine cart ownership" });
       return;
     }
 
@@ -175,14 +193,34 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
+    // 🔒 Prevent quantity updates beyond per-person max
     if (quantity > ticket.maxPerPerson) {
       res.status(400).json({ error: `You can only buy up to ${ticket.maxPerPerson} tickets` });
       return;
     }
 
+    // 🔒 Enforce total stock limits if ticket has a defined quantity (free or paid)
+    if (ticket.quantity != null) {
+      const allCartItems = await cartRepo.find({
+        where: userId ? { userId } : { sessionId },
+        relations: ["ticket"], // ✅ Ensure tickets are loaded
+      });
+
+      const otherCartQuantity = allCartItems
+        .filter(c => c.ticket?.id === ticket.id && c.date === item.date && c.id !== item.id)
+        .reduce((sum, c) => sum + c.quantity, 0);
+
+      if (otherCartQuantity + quantity > ticket.quantity) {
+        const remaining = ticket.quantity - otherCartQuantity;
+        res.status(400).json({
+          error: `Only ${remaining} tickets are available for this event`,
+        });
+        return;
+      }
+    }
+
     item.quantity = quantity;
     await cartRepo.save(item);
-
     res.status(200).json(item);
   } catch (err) {
     console.error("❌ Error updating cart item:", err);
