@@ -8,9 +8,8 @@ async function run() {
     await AppDataSource.initialize();
     const ticketRepo = AppDataSource.getRepository(Ticket);
 
-    // Normalize today's date to 00:00
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split("T")[0]; // "YYYY-MM-DD"
 
     const activeTickets = await ticketRepo.find({
       where: {
@@ -23,10 +22,9 @@ async function run() {
 
     for (const ticket of activeTickets) {
       if (ticket.availableDate) {
-        const ticketDate = new Date(ticket.availableDate);
-        ticketDate.setHours(0, 0, 0, 0); // normalize for comparison
+        const ticketDateStr = new Date(ticket.availableDate).toISOString().split("T")[0];
 
-        if (ticketDate < today) {
+        if (ticketDateStr < todayStr) {
           ticket.isActive = false;
           await ticketRepo.save(ticket);
           deactivatedCount++;
@@ -45,3 +43,5 @@ async function run() {
 }
 
 run();
+
+// npm run auto-deactivate

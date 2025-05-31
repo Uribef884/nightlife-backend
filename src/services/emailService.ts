@@ -1,13 +1,15 @@
+// src/services/emailService.ts
 import nodemailer from "nodemailer";
 import { generateTicketEmailHTML } from "../templates/ticketEmailTemplate";
 
-// Define a reusable type for the ticket email payload
 type TicketEmailPayload = {
   to: string;
   ticketName: string;
   date: string;
   qrImageDataUrl: string;
   clubName: string;
+  index?: number;
+  total?: number;
 };
 
 const transporter = nodemailer.createTransport({
@@ -20,14 +22,10 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-/**
- * Sends a styled ticket email with QR code to the user.
- * @param payload - TicketEmailPayload including recipient and ticket details
- */
 export async function sendTicketEmail(payload: TicketEmailPayload) {
   const html = generateTicketEmailHTML({
     ...payload,
-    email: payload.to, // Used inside the HTML template
+    email: payload.to,
   });
 
   await transporter.sendMail({

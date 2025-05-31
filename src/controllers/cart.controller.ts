@@ -3,6 +3,7 @@ import { AppDataSource } from "../config/data-source";
 import { CartItem } from "../entities/CartItem";
 import { AuthenticatedRequest } from "../types/express";
 import { Ticket } from "../entities/Ticket";
+import { toZonedTime, format } from "date-fns-tz";
 
 function ownsCartItem(item: CartItem, userId?: string, sessionId?: string): boolean {
   if (userId) return item.userId === userId;
@@ -25,11 +26,12 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       return;
     }
 
-    // ✅ Use local date object comparison to avoid UTC shift errors
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const selectedDate = new Date(`${date}T00:00:00`);
-    if (selectedDate < today) {
+    
+    const timeZone = "America/Bogota";
+    const today = toZonedTime(new Date(), timeZone);
+    const todayStr = format(today, "yyyy-MM-dd", { timeZone });
+    
+    if (date < todayStr) {
       res.status(400).json({ error: "Cannot select a past date" });
       return;
     }
@@ -47,11 +49,15 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       return;
     }
 
+    if (!ticket.isActive) {
+       res.status(400).json({ error: "This ticket is currently inactive" });
+      return;
+}
+
     const isFree = ticket.price === 0;
-    const ticketDate =
-    ticket.availableDate instanceof Date
-    ? ticket.availableDate.toISOString().split("T")[0]
-    : new Date(ticket.availableDate!).toISOString().split("T")[0];
+    const ticketDate = ticket.availableDate instanceof Date
+      ? ticket.availableDate.toISOString().split("T")[0]
+      : new Date(ticket.availableDate!).toISOString().split("T")[0];
 
     if (isFree) {
       if (!ticket.availableDate) {
@@ -64,17 +70,34 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       }
     } else {
       if (!ticket.availableDate) {
-        const maxDate = new Date();
-        maxDate.setDate(maxDate.getDate() + 21);
-        const maxStr = maxDate.toISOString().split("T")[0];
-        if (date > maxStr) {
+        // ✅ 🧠 NEW RULE: Don't allow adding normal covers if a special event exists that day
+        const eventConflict = await ticketRepo.findOne({
+          where: {
+            club: { id: ticket.club.id },
+            availableDate: new Date(`${date}T00:00:00`),
+            isRecurrentEvent: false,
+            isActive: true,
+          },
+        });
+
+        if (eventConflict) {
+          res.status(400).json({
+            error: `You cannot buy the normal cover for ${date} because a special event already exists.`,
+          });
+          return;
+        }
+
+        const maxDateStr = new Date(Date.now() + 21 * 86400000).toISOString().split("T")[0];
+        if (date > maxDateStr) {
           res.status(400).json({ error: "You can only select dates within 3 weeks" });
           return;
         }
 
-        const clubOpenDays = ticket.club.openDays || [];
-        const selectedDay = new Date(`${date}T12:00:00`).toLocaleString("en-US", { weekday: "long" });
-        if (!clubOpenDays.includes(selectedDay)) {
+        const selectedDay = new Date(`${date}T12:00:00`).toLocaleString("en-US", {
+          weekday: "long",
+        });
+
+        if (!(ticket.club.openDays || []).includes(selectedDay)) {
           res.status(400).json({ error: `This club is not open on ${selectedDay}` });
           return;
         }
@@ -90,6 +113,17 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       relations: ["ticket", "ticket.club"],
     });
 
+    for (const item of existingItems) {
+      if (item.ticket.club.id !== ticket.club.id) {
+        res.status(400).json({ error: "All tickets in cart must be from the same nightclub" });
+        return;
+      }
+      if (item.date !== date) {
+        res.status(400).json({ error: "All tickets in cart must be for the same date" });
+        return;
+      }
+    }
+
     let totalTicketsInCart = 0;
     for (const item of existingItems) {
       if (item.ticket.id === ticketId && item.date === date) {
@@ -104,7 +138,6 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       return;
     }
 
-    // ✅ Check against remaining stock if quantity is set
     if (ticket.quantity != null) {
       const totalCartQuantity = existingItems
         .filter(item => item.ticket.id === ticketId && item.date === date)
@@ -114,18 +147,6 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
         res.status(400).json({
           error: `Only ${ticket.quantity - totalCartQuantity} tickets are available`,
         });
-        return;
-      }
-    }
-
-    if (existingItems.length > 0) {
-      const { ticket: existingTicket, date: existingDate } = existingItems[0];
-      if (ticket.club.id !== existingTicket.club.id) {
-        res.status(400).json({ error: "All tickets in cart must be from the same nightclub" });
-        return;
-      }
-      if (date !== existingDate) {
-        res.status(400).json({ error: "All tickets in cart must be for the same date" });
         return;
       }
     }

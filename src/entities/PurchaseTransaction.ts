@@ -53,7 +53,7 @@ export class PurchaseTransaction {
   paymentProviderTransactionId?: string; // Wompi or mock_txn_xxxx
 
   @Column({ default: "mock" })
-  paymentProvider!: "mock" | "wompi";
+  paymentProvider!: "mock" | "wompi" | "free";
 
   @Column({ default: "APPROVED" })
   paymentStatus!: "APPROVED" | "DECLINED" | "PENDING";

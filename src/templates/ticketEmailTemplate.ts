@@ -5,12 +5,16 @@ export function generateTicketEmailHTML({
   email,
   qrImageDataUrl,
   clubName,
+  index,
+  total,
 }: {
   ticketName: string;
   date: string;
   email: string;
   qrImageDataUrl: string;
   clubName: string;
+  index?: number;
+  total?: number;
 }): string {
   return `
   <div style="font-family: Arial, sans-serif; background: #111; color: white; padding: 20px; border-radius: 12px; max-width: 500px; margin: auto;">
@@ -19,6 +23,11 @@ export function generateTicketEmailHTML({
     <p><strong>Club:</strong> ${clubName}</p>
     <p><strong>Date:</strong> ${date}</p>
     <p><strong>Email:</strong> ${email}</p>
+    ${
+      index != null && total != null
+        ? `<p><strong>Ticket:</strong> ${index + 1} of ${total}</p>`
+        : ""
+    }
 
     <div style="text-align: center; margin: 30px 0;">
       <img src="${qrImageDataUrl}" alt="QR Code" style="width: 200px;" />

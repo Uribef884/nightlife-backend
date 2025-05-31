@@ -9,30 +9,33 @@ async function refreshRecurringTickets() {
 
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const tickets = await ticketRepo.find();
+
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Normalize to midnight
+    const todayStr = today.toISOString().split("T")[0]; // YYYY-MM-DD
 
     for (const ticket of tickets) {
       if (!ticket.availableDate) continue;
 
-      const currentDate = new Date(ticket.availableDate);
-      currentDate.setHours(0, 0, 0, 0);
+      const current = new Date(ticket.availableDate);
+      const currentStr = current.toISOString().split("T")[0];
 
       if (ticket.isRecurrentEvent) {
-        // ✅ Refresh logic for recurring ticket
-        const nextDate = new Date(currentDate);
-        nextDate.setDate(currentDate.getDate() + 8);
+        if (currentStr < todayStr) {
+          let nextDate = new Date(current);
+          while (nextDate.toISOString().split("T")[0] < todayStr) {
+            nextDate.setDate(nextDate.getDate() + 8);
+          }
 
-        ticket.availableDate = nextDate;
-        ticket.quantity = ticket.originalQuantity ?? ticket.quantity;
-        ticket.isActive = true;
+          ticket.availableDate = nextDate;
+          ticket.quantity = ticket.originalQuantity ?? ticket.quantity;
+          ticket.isActive = true;
 
-        console.log(`🔁 Refreshed: ${ticket.name} → ${nextDate.toDateString()}`);
+          console.log(`🔁 Refreshed: ${ticket.name} → ${nextDate.toDateString()}`);
+        }
       } else {
-        // ✅ Deactivate if past date and not recurrent
-        if (currentDate < today && ticket.isActive) {
+        if (currentStr < todayStr && ticket.isActive) {
           ticket.isActive = false;
-          console.log(`⛔ Deactivated: ${ticket.name} (expired on ${currentDate.toDateString()})`);
+          console.log(`⛔ Deactivated: ${ticket.name} (expired on ${current.toDateString()})`);
         }
       }
 

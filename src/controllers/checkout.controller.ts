@@ -8,6 +8,7 @@ import { calculatePlatformFee, calculateGatewayFees } from "../utils/feeUtils";
 import { isDisposableEmail } from "../utils/disposableEmailValidator";
 import { generateEncryptedQR } from "../utils/generateEncryptedQR";
 import { sendTicketEmail } from "../services/emailService";
+import { differenceInMinutes } from "date-fns";
 import { mockValidateWompiTransaction } from "../services/mockWompiService";
 
 export const processSuccessfulCheckout = async ({
@@ -42,8 +43,50 @@ export const processSuccessfulCheckout = async ({
     return res.status(400).json({ error: "Cart is empty" });
   }
 
+  // ⏰ TTL CHECK: Clear cart if any item is older than 30 minutes
+  const oldest = cartItems.reduce((a, b) => a.createdAt < b.createdAt ? a : b);
+  const age = differenceInMinutes(new Date(), new Date(oldest.createdAt));
+  if (age > 30) {
+    await cartRepo.delete(where);
+    return res.status(400).json({ error: "Cart expired. Please start over." });
+  }
+
+  // 🔒 Inactive ticket guard
+  for (const item of cartItems) {
+    if (!item.ticket.isActive) {
+      return res.status(400).json({
+        error: `The ticket "${item.ticket.name}" is no longer available for purchase.`,
+      });
+    }
+  }
+
+  const isFreeCheckout = cartItems.every(item => Number(item.ticket.price) === 0);
+  if (isFreeCheckout && transactionId) {
+    return res.status(400).json({ error: "Free checkouts should not include a payment transaction" });
+  }
+  if (!isFreeCheckout && !transactionId) {
+    return res.status(400).json({ error: "Missing transaction ID for paid checkout" });
+  }
+
   const clubId = cartItems[0].ticket.clubId;
-  const date = new Date(cartItems[0].date);
+
+  const rawDateStr =
+    cartItems[0].date instanceof Date
+      ? cartItems[0].date.toISOString().split("T")[0]
+      : String(cartItems[0].date);
+
+  const todayStr = new Date().toISOString().split("T")[0];
+  if (rawDateStr < todayStr) {
+    return res.status(400).json({ error: "Cannot select a past date" });
+  }
+
+  const [year, month, day] = rawDateStr.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+
+  const platformFeePercentage = 0.05;
+  let retentionICA: number | undefined;
+  let retentionIVA: number | undefined;
+  let retentionFuente: number | undefined;
 
   let totalPaid = 0;
   let totalClubReceives = 0;
@@ -51,34 +94,27 @@ export const processSuccessfulCheckout = async ({
   let totalGatewayFee = 0;
   let totalGatewayIVA = 0;
 
-  const platformFeePercentage = 0.05;
-  let retentionICA: number | undefined;
-  let retentionIVA: number | undefined;
-  let retentionFuente: number | undefined;
-
   const ticketPurchases: TicketPurchase[] = [];
-  const emailTasks: Promise<void>[] = [];
 
   for (const item of cartItems) {
     const ticket = item.ticket;
     const quantity = item.quantity;
 
-    // ✅ If quantity is set → reduce stock
     if (ticket.quantity != null) {
       const updatedTicket = await ticketRepo.findOneByOrFail({ id: ticket.id });
-
-      if (updatedTicket.quantity! < quantity) {
+      if ((updatedTicket.quantity ?? 0) < quantity) {
         return res.status(400).json({ error: `Not enough tickets left for ${ticket.name}` });
       }
-
-      updatedTicket.quantity! -= quantity;
+      updatedTicket.quantity = (updatedTicket.quantity ?? 0) - quantity;
       await ticketRepo.save(updatedTicket);
     }
 
     for (let i = 0; i < quantity; i++) {
       const basePrice = Number(ticket.price);
-      const platformFee = calculatePlatformFee(basePrice, platformFeePercentage);
-      const { totalGatewayFee: itemGatewayFee, iva } = calculateGatewayFees(basePrice);
+      const platformFee = isFreeCheckout ? 0 : calculatePlatformFee(basePrice, platformFeePercentage);
+      const { totalGatewayFee: itemGatewayFee, iva } = isFreeCheckout
+        ? { totalGatewayFee: 0, iva: 0 }
+        : calculateGatewayFees(basePrice);
 
       const userPaid = basePrice + platformFee + itemGatewayFee + iva;
       const clubReceives = basePrice;
@@ -91,14 +127,14 @@ export const processSuccessfulCheckout = async ({
 
       const payload = {
         ticketId: ticket.id,
-        date: date.toISOString().split("T")[0],
+        date: rawDateStr,
         email,
       };
 
       const qrDataUrl = await generateEncryptedQR(payload);
 
       const purchase = purchaseRepo.create({
-        ticketId: ticket.id as string,
+        ticketId: ticket.id,
         userId: userId ?? undefined,
         clubId,
         email,
@@ -114,28 +150,19 @@ export const processSuccessfulCheckout = async ({
 
       ticketPurchases.push(purchase);
 
-      emailTasks.push(
-        sendTicketEmail({
+      try {
+        await sendTicketEmail({
           to: email,
           ticketName: ticket.name,
-          date: payload.date,
+          date: rawDateStr,
           qrImageDataUrl: qrDataUrl,
           clubName: ticket.club?.name || "Your Club",
-        }).catch(async (err) => {
-          console.warn(`[EMAIL ❌] Failed to send ticket ${i + 1}, retrying...`);
-          try {
-            await sendTicketEmail({
-              to: email,
-              ticketName: ticket.name,
-              date: payload.date,
-              qrImageDataUrl: qrDataUrl,
-              clubName: ticket.club?.name || "Your Club",
-            });
-          } catch (retryErr) {
-            console.error(`[EMAIL ❌] Retry failed for ticket ${i + 1}:`, retryErr);
-          }
-        })
-      );
+          index: i,
+          total: quantity,
+        });
+      } catch (err) {
+        console.error(`[EMAIL ❌] Ticket ${i + 1} failed:`, err);
+      }
     }
   }
 
@@ -152,13 +179,16 @@ export const processSuccessfulCheckout = async ({
     retentionIVA,
     retentionFuente,
     ...(userId ? { userId } : {}),
-    ...(transactionId
+    ...(isFreeCheckout
       ? {
-          paymentProviderTransactionId: transactionId,
-          paymentProvider: "mock",
+          paymentProvider: "free",
           paymentStatus: "APPROVED",
         }
-      : {}),
+      : {
+          paymentProviderTransactionId: transactionId!,
+          paymentProvider: "mock",
+          paymentStatus: "APPROVED",
+        }),
   };
 
   const transaction = transactionRepo.create(transactionData);
@@ -170,14 +200,11 @@ export const processSuccessfulCheckout = async ({
 
   await purchaseRepo.save(ticketPurchases);
 
-  // 🧹 Clear cart
   if (userId) {
     await cartRepo.delete({ userId });
   } else if (sessionId) {
     await cartRepo.delete({ sessionId });
   }
-
-  await Promise.all(emailTasks);
 
   return res.json({
     message: "Checkout completed",

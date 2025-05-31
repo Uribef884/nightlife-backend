@@ -34,7 +34,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       clubId,
     } = req.body;
 
-    if (!name || price == null || !maxPerPerson || !priority) {
+    if (!name || price == null || maxPerPerson == null || priority == null) {
       res.status(400).json({ error: "Missing required fields" });
       return;
     }
@@ -44,30 +44,67 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Parse availableDate as Date (if provided)
-    const parsedDate = availableDate ? new Date(availableDate) : undefined;
+    if (maxPerPerson < 0) {
+      res.status(400).json({ error: "maxPerPerson must be a non-negative number" });
+      return;
+    }
+
+    if (priority < 1) {
+      res.status(400).json({ error: "Priority must be at least 1" });
+      return;
+    }
+
+    if (quantity != null && quantity < 0) {
+      res.status(400).json({ error: "Quantity must be zero or positive" });
+      return;
+    }
+
+    // Normalize availableDate to start of day
+    let parsedDate: Date | undefined;
+    if (availableDate) {
+      parsedDate = new Date(availableDate);
+      parsedDate.setHours(0, 0, 0, 0);
+    }
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
     if (parsedDate && parsedDate < today) {
       res.status(400).json({ error: "Available date cannot be in the past" });
       return;
     }
 
-    // If ticket has stock or is recurring, availableDate is mandatory
-    const hasStockLimit = quantity != null;
-    if ((hasStockLimit || isRecurrentEvent) && !parsedDate) {
-      res.status(400).json({ error: "Tickets with limited quantity or recurring events must include availableDate" });
-      return;
-    }
-
-    // If ticket is free, validate quantity
     const isFree = price === 0;
-    if (isFree && (!quantity || quantity <= 0)) {
-      res.status(400).json({ error: "Free tickets must include a positive quantity" });
+    const hasStock = quantity != null && quantity > 0;
+
+    // Enforce quantity and availableDate requirements
+    if (isFree) {
+      if (!parsedDate) {
+        res.status(400).json({ error: "Free tickets must include availableDate" });
+        return;
+      }
+      if (!hasStock) {
+        res.status(400).json({ error: "Free tickets must include a positive quantity" });
+        return;
+      }
+    }
+
+    if (isRecurrentEvent) {
+      if (!parsedDate) {
+        res.status(400).json({ error: "Recurrent tickets must include availableDate" });
+        return;
+      }
+      if (!hasStock) {
+        res.status(400).json({ error: "Recurrent tickets must include a positive quantity" });
+        return;
+      }
+    }
+
+    if (parsedDate && !hasStock) {
+      res.status(400).json({ error: "Tickets with availableDate must include a positive quantity" });
       return;
     }
 
+    // Role and club validation
     const clubRepo = AppDataSource.getRepository(Club);
     let club: Club | null = null;
 
@@ -97,11 +134,11 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       description,
       price,
       maxPerPerson,
-      priority: Math.max(1, priority),
+      priority,
       isActive: isActive ?? true,
       availableDate: parsedDate,
       quantity,
-      originalQuantity: quantity ?? null, // Persist original if set
+      originalQuantity: quantity ?? null,
       isRecurrentEvent: isRecurrentEvent ?? false,
       club,
     });
@@ -113,6 +150,150 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
     res.status(500).json({ error: "Internal server error" });
   }
 }
+
+export const updateTicket = async (req: Request, res: Response): Promise<void> => {
+  const user = req.user;
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const { id } = req.params;
+  const updates = req.body;
+
+  const ticketRepo = AppDataSource.getRepository(Ticket);
+  const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
+
+  const ticket = await ticketRepo.findOne({
+    where: { id },
+    relations: ["club", "club.owner"],
+  });
+
+  if (!ticket) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+
+  if (user.role === "clubowner" && ticket.club.ownerId !== user.id) {
+    res.status(403).json({ error: "You are not authorized to update this ticket" });
+    return;
+  }
+
+  if ("availableDate" in updates && updates.availableDate) {
+    const normalizedUpdate = new Date(updates.availableDate);
+    normalizedUpdate.setHours(0, 0, 0, 0);
+
+    const normalizedExisting = ticket.availableDate
+      ? new Date(ticket.availableDate)
+      : null;
+
+    if (
+      normalizedExisting &&
+      normalizedUpdate.getTime() !== normalizedExisting.getTime()
+    ) {
+      res.status(400).json({ error: "Cannot update availableDate after creation" });
+      return;
+    }
+  }
+
+  if (
+    "isRecurrentEvent" in updates &&
+    updates.isRecurrentEvent !== ticket.isRecurrentEvent
+  ) {
+    res.status(400).json({ error: "Cannot change isRecurrentEvent after creation" });
+    return;
+  }
+
+  if ("price" in updates) {
+    const oldIsFree = ticket.price === 0;
+    const newIsFree = updates.price === 0;
+
+    if (oldIsFree !== newIsFree) {
+      res
+        .status(400)
+        .json({ error: "Cannot change ticket between free and paid" });
+      return;
+    }
+
+    if (updates.price < 0) {
+      res.status(400).json({ error: "Price must be a non-negative number" });
+      return;
+    }
+  }
+
+  if ("maxPerPerson" in updates && updates.maxPerPerson < 0) {
+    res.status(400).json({ error: "maxPerPerson must be a non-negative number" });
+    return;
+  }
+
+  if ("priority" in updates && updates.priority < 1) {
+    res.status(400).json({ error: "priority must be at least 1" });
+    return;
+  }
+
+  if ("quantity" in updates) {
+    const newQuantity = updates.quantity;
+
+    // ❌ Cannot update quantity if originally null
+    if (ticket.quantity === null) {
+      res.status(400).json({
+        error: "Cannot update quantity for tickets created without quantity",
+      });
+      return;
+    }
+
+    // ❌ Cannot set to null if originally set
+    if (ticket.quantity !== null && newQuantity === null) {
+      res.status(400).json({
+        error: "Cannot remove quantity from tickets that originally had one",
+      });
+      return;
+    }
+
+    if (newQuantity != null && newQuantity < 0) {
+      res.status(400).json({ error: "Quantity must be non-negative" });
+      return;
+    }
+
+    if (newQuantity != null) {
+      let soldCount = 0;
+
+      if (ticket.isRecurrentEvent) {
+        if (!ticket.availableDate) {
+          res
+            .status(400)
+            .json({ error: "Missing availableDate for recurrent ticket" });
+          return;
+        }
+
+        soldCount = await purchaseRepo.count({
+          where: { ticketId: ticket.id, date: ticket.availableDate },
+        });
+      } else {
+        soldCount = await purchaseRepo.count({ where: { ticketId: ticket.id } });
+      }
+
+      if (newQuantity < soldCount) {
+        res.status(400).json({
+          error: `Cannot reduce quantity below number of tickets already sold (${soldCount})`,
+        });
+        return;
+      }
+    }
+  }
+
+  if ("originalQuantity" in updates && updates.originalQuantity !== ticket.originalQuantity) {
+    res.status(400).json({
+      error: "originalQuantity cannot be updated after creation",
+    });
+    return;
+  }
+
+  Object.assign(ticket, updates);
+  await ticketRepo.save(ticket);
+
+  res.json({ message: "Ticket updated successfully", ticket });
+};
 
 // ✅ GET ALL TICKETS
 export async function getAllTickets(req: Request, res: Response): Promise<void> {
@@ -145,89 +326,6 @@ export async function getAllTickets(req: Request, res: Response): Promise<void> 
     res.status(500).json({ error: "Internal server error" });
   }
 }
-
-// ✅ UPDATE TICKET
-export const updateTicket = async (req: Request, res: Response): Promise<void> => {
-  const user = req.user;
-  if (!user) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
-  const { id } = req.params;
-  const updates = req.body;
-
-  const ticketRepo = AppDataSource.getRepository(Ticket);
-  const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
-
-  const ticket = await ticketRepo.findOne({
-    where: { id },
-    relations: ["club", "club.owner"],
-  });
-
-  if (!ticket) {
-    res.status(404).json({ error: "Ticket not found" });
-    return;
-  }
-
-  if (user.role === "clubowner" && ticket.club.ownerId !== user.id) {
-    res.status(403).json({ error: "You are not authorized to update this ticket" });
-    return;
-  }
-
-  // 🛑 Prevent reducing quantity below what has already been sold
-  const newQuantity = updates.quantity;
-  if (newQuantity != null) {
-    let soldCount = 0;
-
-    if (ticket.isRecurrentEvent) {
-      if (!updates.availableDate && !ticket.availableDate) {
-        res.status(400).json({ error: "Missing availableDate for recurrent ticket" });
-        return;
-      }
-      const date = new Date(updates.availableDate || ticket.availableDate);
-      soldCount = await purchaseRepo.count({
-        where: { ticketId: ticket.id, date },
-      });
-    } else {
-      soldCount = await purchaseRepo.count({ where: { ticketId: ticket.id } });
-    }
-
-    if (newQuantity < soldCount) {
-      res.status(400).json({
-        error: `Cannot reduce quantity below number of tickets already sold (${soldCount})`,
-      });
-      return;
-    }
-  }
-
-  // ✅ Allow changing to free if availableDate is present and quantity > 0
-  if ("price" in updates) {
-    const newPrice = Number(updates.price);
-    if (isNaN(newPrice) || newPrice < 0) {
-      res.status(400).json({ error: "Price must be a non-negative number" });
-      return;
-    }
-
-    if (newPrice === 0) {
-      const dateToCheck = updates.availableDate || ticket.availableDate;
-      if (!dateToCheck || isNaN(Date.parse(dateToCheck))) {
-        res.status(400).json({ error: "Free tickets must include a valid availableDate" });
-        return;
-      }
-
-      if (!("quantity" in updates) || updates.quantity == null || updates.quantity <= 0) {
-        res.status(400).json({ error: "Free tickets must include a positive quantity" });
-        return;
-      }
-    }
-  }
-
-  Object.assign(ticket, updates);
-  await ticketRepo.save(ticket);
-
-  res.json({ message: "Ticket updated successfully", ticket });
-};
 
 // ✅ GET TICKETS BY CLUB
 export async function getTicketsByClub(req: Request, res: Response): Promise<void> {
@@ -348,7 +446,7 @@ export const getTicketsForMyClub = async (req: AuthenticatedRequest, res: Respon
     console.error("❌ Error fetching my club's tickets:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-};
+}
 
 export async function deleteTicket(req: Request, res: Response): Promise<void> {
   try {
@@ -411,4 +509,4 @@ export const toggleTicketVisibility = async (req: Request, res: Response): Promi
     console.error("❌ Error toggling ticket visibility:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-};
+}
