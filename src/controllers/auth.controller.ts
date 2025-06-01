@@ -8,22 +8,32 @@ import { isDisposableEmail } from "../utils/disposableEmailValidator";
 import { clearAnonymousCart } from "../utils/clearAnonymousCart";
 import { AuthenticatedRequest } from "../types/express";
 import { CartItem } from "../entities/CartItem";
+import { authSchemaRegister } from "../schemas/auth.schema";
+import { forgotPasswordSchema, resetPasswordSchema } from "../schemas/forgot.schema";
+import { sendPasswordResetEmail } from "../services/emailService"; // ✅ to be created next
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
+const RESET_SECRET = process.env.RESET_SECRET || "dev-reset-secret";
+const RESET_EXPIRY = "15m";
 
 export async function register(req: Request, res: Response): Promise<void> {
   try {
-    const { email, password } = req.body;
+    const result = authSchemaRegister.safeParse(req.body);
 
-    if (!email || !password) {
-      res.status(400).json({ error: "Email and password are required" });
+    if (!result.success) {
+      res.status(400).json({
+        error: "Invalid input",
+        details: result.error.flatten(),
+      });
       return;
     }
+
+    const { email, password } = result.data;
+
     if (isDisposableEmail(email)) {
       res.status(403).json({ error: "Email domain not allowed" });
       return;
     }
-
 
     const repo = AppDataSource.getRepository(User);
     const existing = await repo.findOneBy({ email });
@@ -33,16 +43,10 @@ export async function register(req: Request, res: Response): Promise<void> {
     }
 
     const hashed = await bcrypt.hash(password, 10);
-    const user = repo.create({
-      email,
-      password: hashed,
-      role: "user", // explicitly default to 'user'
-    });
+    const user = repo.create({ email, password: hashed, role: "user" });
     await repo.save(user);
 
-    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
 
     res.status(201).json({
       message: "User registered successfully",
@@ -59,7 +63,7 @@ export async function login(req: Request, res: Response): Promise<void> {
   const { email, password } = req.body;
 
   if (!email || !password) {
-    res.status(400).json({ error: "Email and password are required" });
+    res.status(401).json({ error: "Invalid credentials" });
     return;
   }
 
@@ -72,12 +76,16 @@ export async function login(req: Request, res: Response): Promise<void> {
   }
 
   const isMatch = await bcrypt.compare(password, user.password);
-  if (!isMatch) {
+
+  // ✅ Optional: check password strength here too
+  const strongEnough = /[A-Z]/.test(password) && /[0-9]/.test(password);
+
+  if (!isMatch || !strongEnough) {
     res.status(401).json({ error: "Invalid credentials" });
     return;
   }
 
-  // ✅ Clear anonymous cart
+  // Clear anonymous cart
   const sessionId = req.cookies?.sessionId;
   if (sessionId) {
     await clearAnonymousCart(sessionId);
@@ -85,19 +93,14 @@ export async function login(req: Request, res: Response): Promise<void> {
     (req as any).sessionId = undefined;
   }
 
-  // ✅ Assign clubId based on role
   let clubId: string | undefined = undefined;
-
   if (user.role === "clubowner") {
     const club = await AppDataSource.getRepository(Club).findOneBy({ ownerId: user.id });
-    if (club) {
-      clubId = club.id;
-    }
+    if (club) clubId = club.id;
   } else if (user.role === "bouncer") {
     clubId = user.clubId;
   }
 
-  // ✅ Sign JWT with clubId if present
   const token = jwt.sign(
     {
       id: user.id,
@@ -234,5 +237,54 @@ export async function updateUserRole(req: Request, res: Response): Promise<void>
   } catch (error) {
     console.error("❌ Error updating user role:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function forgotPassword(req: Request, res: Response): Promise<void> {
+  const result = forgotPasswordSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(200).json({ message: "Reset link has been sent." });
+    return;
+  }
+
+  const { email } = result.data;
+  const user = await AppDataSource.getRepository(User).findOneBy({ email });
+  if (!user) {
+    res.status(200).json({ message: "Reset link has been sent." });
+    return;
+  }
+
+  const token = jwt.sign({ id: user.id }, RESET_SECRET, { expiresIn: RESET_EXPIRY });
+  await sendPasswordResetEmail(user.email, token);
+
+  res.status(200).json({ message: "Reset link has been sent." });
+}
+
+export async function resetPassword(req: Request, res: Response): Promise<void> {
+  const result = resetPasswordSchema.safeParse(req.body);
+  if (!result.success) {
+    res.status(400).json({ error: "Invalid input" });
+    return;
+  }
+
+  const { token, newPassword } = result.data;
+
+  try {
+    const payload = jwt.verify(token, RESET_SECRET) as { id: string };
+    const repo = AppDataSource.getRepository(User);
+    const user = await repo.findOneBy({ id: payload.id });
+
+    if (!user) {
+      res.status(400).json({ error: "Invalid token or user" });
+      return;
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    await repo.save(user);
+
+    res.status(200).json({ message: "Password reset successfully" });
+  } catch (err) {
+    console.error("❌ Error resetting password:", err);
+    res.status(400).json({ error: "Invalid or expired token" });
   }
 }

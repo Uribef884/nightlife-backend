@@ -35,3 +35,23 @@ export async function sendTicketEmail(payload: TicketEmailPayload) {
     html,
   });
 }
+
+export async function sendPasswordResetEmail(email: string, token: string): Promise<void> {
+  const resetUrl = `${process.env.FRONTEND_BASE_URL}/reset-password?token=${token}`;
+
+  const html = `
+    <div style="font-family: sans-serif; padding: 1rem;">
+      <h2>Reset your NightLife password</h2>
+      <p>Click the link below to set a new password:</p>
+      <p><a href="${resetUrl}" target="_blank">${resetUrl}</a></p>
+      <p>This link will expire in 15 minutes. If you didn’t request this, you can ignore it.</p>
+    </div>
+  `;
+
+  await transporter.sendMail({
+    from: `"NightLife Support" <${process.env.SMTP_USER}>`,
+    to: email,
+    subject: "Reset Your NightLife Password",
+    html,
+  });
+}
