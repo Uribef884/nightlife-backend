@@ -9,6 +9,7 @@ import {
 } from "typeorm";
 import { Ticket } from "./Ticket";
 import { User } from "./User";
+import { Event } from "./Event"; 
 
 @Entity()
 export class Club {
@@ -24,11 +25,23 @@ export class Club {
   @Column()
   address!: string;
 
-  @Column()
-  location!: string;
+  @Column({ default: "https://maps.google.com" })
+  googleMaps!: string; 
 
-  @Column()
-  musicType!: string;
+  @Column({ default: "Medellín" })
+  city!: string;
+ 
+  @Column("text", { array: true })
+  musicType!: string[]; 
+
+  @Column("text", { array: true })
+  openDays!: string[]; 
+
+  @Column("float", { nullable: true })
+  latitude?: number;
+
+  @Column("float", { nullable: true })
+  longitude?: number;
 
   @Column({ nullable: true })
   instagram?: string;
@@ -38,9 +51,6 @@ export class Club {
 
   @Column()
   openHours!: string;
-
-  @Column("simple-array")
-  openDays!: string[]; // e.g., ["Friday", "Saturday"]
 
   @Column({ nullable: true })
   dressCode?: string;
@@ -77,4 +87,7 @@ export class Club {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @OneToMany(() => Event, (event) => event.club)
+  events!: Event[];
 }

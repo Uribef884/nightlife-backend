@@ -3,7 +3,9 @@ import { AppDataSource } from "../config/data-source";
 import { Ticket } from "../entities/Ticket";
 import { Club } from "../entities/Club";
 import { AuthenticatedRequest } from "../types/express";
-import { TicketPurchase } from "../entities/TicketPurchase"; // Add this import if not present
+import { TicketPurchase } from "../entities/TicketPurchase"; 
+import { Event } from "../entities/Event";
+import { TicketCategory } from "../entities/Ticket";
 
 // Utility to normalize today's date
 const getTodayISO = (): string => {
@@ -12,7 +14,7 @@ const getTodayISO = (): string => {
   return today.toISOString().split("T")[0];
 };
 
-// ✅ CREATE TICKET
+// CREATE TICKET
 export async function createTicket(req: Request, res: Response): Promise<void> {
   try {
     const user = req.user;
@@ -30,120 +32,88 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       isActive,
       availableDate,
       quantity,
-      isRecurrentEvent,
-      clubId,
+      category,
+      eventId, // ✅ clubId removed from destructuring
     } = req.body;
 
-    if (!name || price == null || maxPerPerson == null || priority == null) {
+    if (!name || price == null || maxPerPerson == null || priority == null || !category) {
       res.status(400).json({ error: "Missing required fields" });
       return;
     }
 
-    if (price < 0) {
-      res.status(400).json({ error: "Price must be zero or positive" });
+    if (price < 0 || maxPerPerson < 0 || priority < 1) {
+      res.status(400).json({ error: "Invalid price, maxPerPerson, or priority" });
       return;
     }
 
-    if (maxPerPerson < 0) {
-      res.status(400).json({ error: "maxPerPerson must be a non-negative number" });
-      return;
-    }
-
-    if (priority < 1) {
-      res.status(400).json({ error: "Priority must be at least 1" });
-      return;
-    }
-
-    if (quantity != null && quantity < 0) {
-      res.status(400).json({ error: "Quantity must be zero or positive" });
-      return;
-    }
-
-    // Normalize availableDate to start of day
-    let parsedDate: Date | undefined;
-    if (availableDate) {
-      parsedDate = new Date(availableDate);
-      parsedDate.setHours(0, 0, 0, 0);
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (parsedDate && parsedDate < today) {
-      res.status(400).json({ error: "Available date cannot be in the past" });
-      return;
-    }
-
-    const isFree = price === 0;
-    const hasStock = quantity != null && quantity > 0;
-
-    // Enforce quantity and availableDate requirements
-    if (isFree) {
-      if (!parsedDate) {
-        res.status(400).json({ error: "Free tickets must include availableDate" });
-        return;
-      }
-      if (!hasStock) {
-        res.status(400).json({ error: "Free tickets must include a positive quantity" });
-        return;
-      }
-    }
-
-    if (isRecurrentEvent) {
-      if (!parsedDate) {
-        res.status(400).json({ error: "Recurrent tickets must include availableDate" });
-        return;
-      }
-      if (!hasStock) {
-        res.status(400).json({ error: "Recurrent tickets must include a positive quantity" });
-        return;
-      }
-    }
-
-    if (parsedDate && !hasStock) {
-      res.status(400).json({ error: "Tickets with availableDate must include a positive quantity" });
-      return;
-    }
-
-    // Role and club validation
     const clubRepo = AppDataSource.getRepository(Club);
     let club: Club | null = null;
 
+    // 🔐 Admins must specify clubId
     if (user.role === "admin") {
+      const { clubId } = req.body;
       if (!clubId) {
         res.status(400).json({ error: "Admin must specify clubId" });
         return;
       }
       club = await clubRepo.findOne({ where: { id: clubId }, relations: ["owner"] });
-      if (!club) {
-        res.status(404).json({ error: "Club not found" });
-        return;
-      }
-    } else if (user.role === "clubowner") {
-      club = await clubRepo.findOne({ where: { owner: { id: user.id } } });
-      if (!club) {
-        res.status(403).json({ error: "You do not own a club" });
-        return;
-      }
-    } else {
-      res.status(403).json({ error: "You are not authorized to create tickets" });
+    }
+
+    // 🔐 Clubowners derive clubId from login
+    else if (user.role === "clubowner") {
+      club = await clubRepo.findOne({ where: { ownerId: user.id } });
+    }
+
+    if (!club) {
+      res.status(403).json({ error: "Unauthorized or club not found" });
       return;
     }
 
-    const ticket = AppDataSource.getRepository(Ticket).create({
+    // 📅 Normalize available date
+    let parsedDate: Date | null = null;
+    let event: Event | null = null;
+
+    if (eventId) {
+      const eventRepo = AppDataSource.getRepository(Event);
+      event = await eventRepo.findOne({ where: { id: eventId }, relations: ["club"] });
+
+      if (!event || event.clubId !== club.id) {
+        res.status(404).json({ error: "Event not found or not owned by your club" });
+        return;
+      }
+
+      const [year, month, day] = String(event.availableDate).split("T")[0].split("-").map(Number);
+      parsedDate = new Date(year, month - 1, day);
+    } else if (availableDate) {
+      const [year, month, day] = availableDate.split("-").map(Number);
+      parsedDate = new Date(year, month - 1, day);
+      parsedDate.setHours(0, 0, 0, 0);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (parsedDate < today) {
+        res.status(400).json({ error: "Available date cannot be in the past" });
+        return;
+      }
+    }
+
+    const ticketRepo = AppDataSource.getRepository(Ticket);
+    const ticket = ticketRepo.create({
       name,
       description,
       price,
       maxPerPerson,
       priority,
       isActive: isActive ?? true,
-      availableDate: parsedDate,
-      quantity,
+      availableDate: parsedDate ?? undefined,
+      quantity: quantity ?? null,
       originalQuantity: quantity ?? null,
-      isRecurrentEvent: isRecurrentEvent ?? false,
-      club,
+      category,
+      club, // ✅ set by lookup, not user input
+      ...(event ? { event } : {}),
     });
 
-    const saved = await AppDataSource.getRepository(Ticket).save(ticket);
+    const saved = await ticketRepo.save(ticket);
     res.status(201).json(saved);
   } catch (error) {
     console.error("❌ Error creating ticket:", error);
@@ -151,6 +121,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
   }
 }
 
+// ✅ UPDATE TICKET
 export const updateTicket = async (req: Request, res: Response): Promise<void> => {
   const user = req.user;
   if (!user) {
@@ -179,6 +150,22 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
     return;
   }
 
+  // ❌ Prevent changing category
+  if ("category" in updates && updates.category !== ticket.category) {
+    res.status(400).json({
+      error: "Cannot change category after ticket creation",
+    });
+    return;
+  }
+
+  // ❌ Prevent changing eventId
+  if ("eventId" in updates && updates.eventId !== ticket.eventId) {
+    res.status(400).json({
+      error: "Cannot change eventId after ticket creation",
+    });
+    return;
+  }
+
   if ("availableDate" in updates && updates.availableDate) {
     const normalizedUpdate = new Date(updates.availableDate);
     normalizedUpdate.setHours(0, 0, 0, 0);
@@ -196,30 +183,45 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
     }
   }
 
-  if (
-    "isRecurrentEvent" in updates &&
-    updates.isRecurrentEvent !== ticket.isRecurrentEvent
-  ) {
-    res.status(400).json({ error: "Cannot change isRecurrentEvent after creation" });
-    return;
-  }
-
   if ("price" in updates) {
-    const oldIsFree = ticket.price === 0;
-    const newIsFree = updates.price === 0;
+    const newPrice = parseFloat(updates.price);
 
-    if (oldIsFree !== newIsFree) {
-      res
-        .status(400)
-        .json({ error: "Cannot change ticket between free and paid" });
-      return;
-    }
-
-    if (updates.price < 0) {
+    if (isNaN(newPrice) || newPrice < 0) {
       res.status(400).json({ error: "Price must be a non-negative number" });
       return;
     }
+
+    // Lock based on category
+    if (ticket.category === TicketCategory.FREE && newPrice !== 0) {
+      res.status(400).json({
+        error: "Cannot change price of a free ticket to a non-zero value",
+      });
+      return;
+    }
+
+    if (
+      ticket.category !== TicketCategory.FREE &&
+      ticket.price === 0 &&
+      newPrice > 0
+    ) {
+      res.status(400).json({
+        error: "Cannot change a free ticket to a paid ticket",
+      });
+      return;
+    }
+
+    if (
+      ticket.category !== TicketCategory.FREE &&
+      ticket.price > 0 &&
+      newPrice === 0
+    ) {
+      res.status(400).json({
+        error: "Cannot change a paid ticket to free",
+      });
+      return;
+    }
   }
+
 
   if ("maxPerPerson" in updates && updates.maxPerPerson < 0) {
     res.status(400).json({ error: "maxPerPerson must be a non-negative number" });
@@ -234,7 +236,6 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
   if ("quantity" in updates) {
     const newQuantity = updates.quantity;
 
-    // ❌ Cannot update quantity if originally null
     if (ticket.quantity === null) {
       res.status(400).json({
         error: "Cannot update quantity for tickets created without quantity",
@@ -242,7 +243,6 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    // ❌ Cannot set to null if originally set
     if (ticket.quantity !== null && newQuantity === null) {
       res.status(400).json({
         error: "Cannot remove quantity from tickets that originally had one",
@@ -256,22 +256,7 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
     }
 
     if (newQuantity != null) {
-      let soldCount = 0;
-
-      if (ticket.isRecurrentEvent) {
-        if (!ticket.availableDate) {
-          res
-            .status(400)
-            .json({ error: "Missing availableDate for recurrent ticket" });
-          return;
-        }
-
-        soldCount = await purchaseRepo.count({
-          where: { ticketId: ticket.id, date: ticket.availableDate },
-        });
-      } else {
-        soldCount = await purchaseRepo.count({ where: { ticketId: ticket.id } });
-      }
+      const soldCount = await purchaseRepo.count({ where: { ticketId: ticket.id } });
 
       if (newQuantity < soldCount) {
         res.status(400).json({
@@ -282,11 +267,19 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
     }
   }
 
-  if ("originalQuantity" in updates && updates.originalQuantity !== ticket.originalQuantity) {
+  if (
+    "originalQuantity" in updates &&
+    updates.originalQuantity !== ticket.originalQuantity
+  ) {
     res.status(400).json({
       error: "originalQuantity cannot be updated after creation",
     });
     return;
+  }
+
+  if ("clubId" in updates && updates.clubId !== ticket.clubId) {
+  res.status(400).json({ error: "clubId cannot be updated" });
+  return;
   }
 
   Object.assign(ticket, updates);
@@ -304,16 +297,6 @@ export async function getAllTickets(req: Request, res: Response): Promise<void> 
       relations: ["club"],
       order: { priority: "ASC" },
     });
-
-    const todayISO = getTodayISO();
-
-    for (const ticket of tickets) {
-      const dateISO = ticket.availableDate?.toISOString().split("T")[0];
-      if (dateISO && dateISO < todayISO && !ticket.isRecurrentEvent && ticket.isActive) {
-        ticket.isActive = false;
-        await repo.save(ticket);
-      }
-    }
 
     const formatted = tickets.map((t) => ({
       ...t,
@@ -336,16 +319,6 @@ export async function getTicketsByClub(req: Request, res: Response): Promise<voi
       where: { club: { id } },
       order: { priority: "ASC" },
     });
-
-    const todayISO = getTodayISO();
-
-    for (const ticket of tickets) {
-      const dateISO = ticket.availableDate?.toISOString().split("T")[0];
-      if (dateISO && dateISO < todayISO && !ticket.isRecurrentEvent && ticket.isActive) {
-        ticket.isActive = false;
-        await repo.save(ticket);
-      }
-    }
 
     const formatted = tickets.map((t) => ({
       ...t,
@@ -381,13 +354,6 @@ export async function getTicketById(req: AuthenticatedRequest, res: Response): P
     if (user.role === "clubowner" && ticket.club.ownerId !== user.id) {
       res.status(403).json({ error: "Forbidden: This ticket doesn't belong to your club" });
       return;
-    }
-
-    const todayISO = getTodayISO();
-    const dateISO = ticket.availableDate?.toISOString().split("T")[0];
-    if (dateISO && dateISO < todayISO && !ticket.isRecurrentEvent && ticket.isActive) {
-      ticket.isActive = false;
-      await ticketRepo.save(ticket);
     }
 
     const response = {
@@ -426,16 +392,6 @@ export const getTicketsForMyClub = async (req: AuthenticatedRequest, res: Respon
       order: { priority: "ASC" },
     });
 
-    const todayISO = getTodayISO();
-
-    for (const ticket of tickets) {
-      const dateISO = ticket.availableDate?.toISOString().split("T")[0];
-      if (dateISO && dateISO < todayISO && !ticket.isRecurrentEvent && ticket.isActive) {
-        ticket.isActive = false;
-        await ticketRepo.save(ticket);
-      }
-    }
-
     const formatted = tickets.map((t) => ({
       ...t,
       soldOut: t.quantity !== null && t.quantity === 0,
@@ -448,6 +404,7 @@ export const getTicketsForMyClub = async (req: AuthenticatedRequest, res: Respon
   }
 }
 
+// ✅ DELETE TICKET
 export async function deleteTicket(req: Request, res: Response): Promise<void> {
   try {
     const user = req.user;
@@ -478,6 +435,7 @@ export async function deleteTicket(req: Request, res: Response): Promise<void> {
   }
 }
 
+// ✅ TOGGLE VISIBILITY
 export const toggleTicketVisibility = async (req: Request, res: Response): Promise<void> => {
   try {
     const user = req.user;
@@ -509,4 +467,4 @@ export const toggleTicketVisibility = async (req: Request, res: Response): Promi
     console.error("❌ Error toggling ticket visibility:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-}
+};

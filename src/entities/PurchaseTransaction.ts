@@ -5,16 +5,23 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
 } from "typeorm";
 import { TicketPurchase } from "./TicketPurchase";
+import { User } from "./User";
 
 @Entity()
 export class PurchaseTransaction {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @Column({ nullable: true })
-  userId?: string;
+//  @Column({ nullable: true  })
+//  userId?: string;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "userId" })
+  user?: User;
 
   @Column()
   clubId!: string;

@@ -9,12 +9,16 @@ import {
 } from "typeorm";
 import { Club } from "./Club";
 import { CartItem } from "./CartItem";
+import { Event } from "./Event";
+
+export enum TicketCategory {
+  GENERAL = "general",
+  EVENT = "event",
+  FREE = "free",
+}
 
 @Entity()
 export class Ticket {
-  @OneToMany(() => CartItem, (cartItem: CartItem) => cartItem.ticket)
-  cartItems!: CartItem[];
-
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
@@ -37,26 +41,39 @@ export class Ticket {
   isActive!: boolean;
 
   @Column({ type: "date", nullable: true })
-  availableDate?: Date; // 
+  availableDate?: Date;
 
   @Column("int", { nullable: true })
-  quantity?: number; 
+  quantity?: number;
+
+  @Column("int", { nullable: true })
+  originalQuantity?: number;
+
+  @Column({
+    type: "enum",
+    enum: TicketCategory,
+    default: TicketCategory.GENERAL,
+  })
+  category!: TicketCategory;
+
+  @Column()
+  clubId!: string;
+
+  @ManyToOne(() => Club, (club) => club.tickets, { onDelete: "CASCADE" })
+  club!: Club;
+
+  @Column({ nullable: true })
+  eventId?: string;
+
+  @ManyToOne(() => Event, (event) => event.tickets, { onDelete: "CASCADE", nullable: true })
+  event?: Event;
+
+  @OneToMany(() => CartItem, (cartItem: CartItem) => cartItem.ticket)
+  cartItems!: CartItem[];
 
   @CreateDateColumn()
   createdAt!: Date;
 
   @UpdateDateColumn()
   updatedAt!: Date;
-
-  @Column()
-  clubId!: string;
-
-  @Column({ default: false })
-  isRecurrentEvent!: boolean;
-
-  @Column("int", { nullable: true })
-  originalQuantity?: number;
-
-  @ManyToOne(() => Club, (club) => club.tickets, { onDelete: "CASCADE" })
-  club!: Club;
 }

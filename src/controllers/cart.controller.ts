@@ -26,11 +26,10 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       return;
     }
 
-    
     const timeZone = "America/Bogota";
     const today = toZonedTime(new Date(), timeZone);
     const todayStr = format(today, "yyyy-MM-dd", { timeZone });
-    
+
     if (date < todayStr) {
       res.status(400).json({ error: "Cannot select a past date" });
       return;
@@ -50,61 +49,60 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
     }
 
     if (!ticket.isActive) {
-       res.status(400).json({ error: "This ticket is currently inactive" });
+      res.status(400).json({ error: "This ticket is currently inactive" });
       return;
-}
+    }
 
-    const isFree = ticket.price === 0;
+    const isFree = ticket.category === "free";
     const ticketDate = ticket.availableDate instanceof Date
       ? ticket.availableDate.toISOString().split("T")[0]
-      : new Date(ticket.availableDate!).toISOString().split("T")[0];
+      : ticket.availableDate
+        ? new Date(ticket.availableDate).toISOString().split("T")[0]
+        : undefined;
 
+    // 🧠 Free ticket must match availableDate
     if (isFree) {
-      if (!ticket.availableDate) {
-        res.status(400).json({ error: "This free ticket has no date assigned" });
-        return;
-      }
-      if (date !== ticketDate) {
+      if (!ticketDate || ticketDate !== date) {
         res.status(400).json({ error: "This free ticket is only valid on its available date" });
         return;
       }
-    } else {
-      if (!ticket.availableDate) {
-        // ✅ 🧠 NEW RULE: Don't allow adding normal covers if a special event exists that day
-        const eventConflict = await ticketRepo.findOne({
-          where: {
-            club: { id: ticket.club.id },
-            availableDate: new Date(`${date}T00:00:00`),
-            isRecurrentEvent: false,
-            isActive: true,
-          },
+    }
+
+    // 🧠 Block general tickets when special event exists on same day (but allow free)
+    if (!isFree && !ticket.availableDate && ticket.category === "general") {
+      const conflictEvent = await ticketRepo.findOne({
+        where: {
+          club: { id: ticket.club.id },
+          availableDate: new Date(`${date}T00:00:00`),
+          isActive: true,
+        },
+      });
+
+      if (conflictEvent) {
+        res.status(400).json({
+          error: `You cannot buy a general cover for ${date} because a special event already exists.`,
         });
-
-        if (eventConflict) {
-          res.status(400).json({
-            error: `You cannot buy the normal cover for ${date} because a special event already exists.`,
-          });
-          return;
-        }
-
-        const maxDateStr = new Date(Date.now() + 21 * 86400000).toISOString().split("T")[0];
-        if (date > maxDateStr) {
-          res.status(400).json({ error: "You can only select dates within 3 weeks" });
-          return;
-        }
-
-        const selectedDay = new Date(`${date}T12:00:00`).toLocaleString("en-US", {
-          weekday: "long",
-        });
-
-        if (!(ticket.club.openDays || []).includes(selectedDay)) {
-          res.status(400).json({ error: `This club is not open on ${selectedDay}` });
-          return;
-        }
-      } else if (ticketDate !== date) {
-        res.status(400).json({ error: "This ticket is not available on that date" });
         return;
       }
+
+      // Validate 3-week max
+      const maxDateStr = new Date(Date.now() + 21 * 86400000).toISOString().split("T")[0];
+      if (date > maxDateStr) {
+        res.status(400).json({ error: "You can only select dates within 3 weeks" });
+        return;
+      }
+
+      const selectedDay = new Date(`${date}T12:00:00`).toLocaleString("en-US", {
+        weekday: "long",
+      });
+
+      if (!(ticket.club.openDays || []).includes(selectedDay)) {
+        res.status(400).json({ error: `This club is not open on ${selectedDay}` });
+        return;
+      }
+    } else if (!isFree && ticketDate !== date) {
+      res.status(400).json({ error: "This ticket is not available on that date" });
+      return;
     }
 
     const whereClause = userId ? { userId } : { sessionId };

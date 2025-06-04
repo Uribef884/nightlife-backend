@@ -13,6 +13,7 @@ import cartRoutes from "./routes/cart.routes";
 import { attachSessionId } from "./middlewares/sessionMiddleware";
 import checkoutRoutes from "./routes/checkout.routes";
 import purchaseRoutes from "./routes/purchases.routes";
+import eventRoutes from "./routes/event.routes";
 
 dotenv.config();
 
@@ -36,6 +37,7 @@ app.use("/bouncers", bouncerRoutes);
 app.use("/cart", cartRoutes);
 app.use("/checkout", checkoutRoutes);
 app.use("/purchases", purchaseRoutes);
+app.use("/events", eventRoutes);
 
 // DB Connection + Server Start
 AppDataSource.initialize()

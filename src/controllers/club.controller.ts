@@ -4,6 +4,7 @@ import { Club } from "../entities/Club";
 import { User } from "../entities/User";
 import { AuthenticatedRequest } from "../types/express"; 
 
+// CREATE CLUB
 export async function createClub(req: AuthenticatedRequest, res: Response): Promise<void> {
   const repo = AppDataSource.getRepository(Club);
   const userRepo = AppDataSource.getRepository(User);
@@ -12,7 +13,8 @@ export async function createClub(req: AuthenticatedRequest, res: Response): Prom
     name,
     description,
     address,
-    location,
+    city,
+    googleMaps,
     musicType,
     instagram,
     whatsapp,
@@ -24,18 +26,19 @@ export async function createClub(req: AuthenticatedRequest, res: Response): Prom
     priority,
     profileImageUrl,
     profileImageBlurhash,
-    ownerId
+    latitude,
+    longitude,
+    ownerId,
   } = req.body;
 
   const admin = req.user;
-
   if (!admin || admin.role !== "admin") {
     res.status(403).json({ error: "Forbidden: Only admins can create clubs" });
     return;
   }
 
-  if (!ownerId) {
-    res.status(400).json({ error: "Missing required field: ownerId" });
+  if (!ownerId || typeof ownerId !== "string" || ownerId.trim() === "") {
+    res.status(400).json({ error: "Missing or invalid required field: ownerId" });
     return;
   }
 
@@ -49,7 +52,8 @@ export async function createClub(req: AuthenticatedRequest, res: Response): Prom
     name,
     description,
     address,
-    location,
+    city,
+    googleMaps,
     musicType,
     instagram,
     whatsapp,
@@ -58,11 +62,13 @@ export async function createClub(req: AuthenticatedRequest, res: Response): Prom
     dressCode,
     minimumAge,
     extraInfo,
-    priority: Math.max(1, priority || 999),
+    priority: priority && priority >= 1 ? priority : 1,
     profileImageUrl,
     profileImageBlurhash,
+    latitude,
+    longitude,
     owner,
-    ownerId: owner.id
+    ownerId: owner.id,
   });
 
   await repo.save(club);
@@ -83,20 +89,23 @@ export async function updateClub(req: AuthenticatedRequest, res: Response): Prom
     const user = req.user;
 
     const club = await repo.findOne({ where: { id }, relations: ["owner"] });
-
     if (!club) {
       res.status(404).json({ error: "Club not found" });
       return;
     }
 
-    // 🔒 Prevent clubowners from updating clubs they don't own
     if (user?.role === "clubowner" && club.ownerId !== user.id) {
       res.status(403).json({ error: "You do not own this club" });
       return;
     }
 
-    // ✅ Remove forbidden fields (e.g., ownerId)
-    const { ownerId, ...allowedUpdates } = req.body;
+    const { ownerId, priority, ...allowedUpdates } = req.body;
+
+    if (priority && priority < 1) {
+      allowedUpdates.priority = 1;
+    } else if (priority) {
+      allowedUpdates.priority = priority;
+    }
 
     repo.merge(club, allowedUpdates);
     const updated = await repo.save(club);
@@ -146,7 +155,29 @@ export async function getAllClubs(req: Request, res: Response): Promise<void> {
     const clubs = await repo.find({
       order: { priority: "ASC" }
     });
-    res.json(clubs);
+
+    const publicClubs = clubs.map(club => ({
+      id: club.id,
+      name: club.name,
+      description: club.description,
+      address: club.address,
+      googleMaps: club.googleMaps,
+      latitude: club.latitude,
+      longitude: club.longitude,
+      musicType: club.musicType,
+      instagram: club.instagram,
+      whatsapp: club.whatsapp,
+      openHours: club.openHours,
+      openDays: club.openDays,
+      dressCode: club.dressCode,
+      minimumAge: club.minimumAge,
+      extraInfo: club.extraInfo,
+      profileImageUrl: club.profileImageUrl,
+      profileImageBlurhash: club.profileImageBlurhash,
+      priority: club.priority,
+    }));
+
+    res.json(publicClubs);
   } catch (error) {
     console.error("❌ Error fetching clubs:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -169,17 +200,20 @@ export async function getClubById(req: AuthenticatedRequest, res: Response): Pro
     const isAdmin = user?.role === "admin";
     const isOwner = user?.role === "clubowner" && user.id === club.ownerId;
     const isBouncer = user?.role === "bouncer";
-    
+
     if (isAdmin || isOwner) {
       res.status(200).json(club); // return full object
     } else {
-      // return partial data
+      // return public view
       const publicFields = {
         id: club.id,
         name: club.name,
         description: club.description,
         address: club.address,
-        location: club.location,
+        city: club.city,
+        googleMaps: club.googleMaps,
+        latitude: club.latitude,
+        longitude: club.longitude,
         musicType: club.musicType,
         instagram: club.instagram,
         whatsapp: club.whatsapp,
@@ -196,6 +230,95 @@ export async function getClubById(req: AuthenticatedRequest, res: Response): Pro
     }
   } catch (error) {
     console.error("❌ Error fetching club:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+const ALLOWED_MUSIC_TYPES = ["Electronic", "Techno", "Reggaeton", "Crossover", "Salsa", "Pop"];
+const ALLOWED_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function coerceToStringArray(input: any): string[] {
+  if (Array.isArray(input)) {
+    return input.map(String).map(s => s.trim()).filter(Boolean);
+  }
+  if (typeof input === "string") {
+    return input.split(",").map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+export async function getFilteredClubs(req: Request, res: Response): Promise<void> {
+  try {
+    const repo = AppDataSource.getRepository(Club);
+    const queryBuilder = repo.createQueryBuilder("club");
+
+    const { query, city, musicType, openDays } = req.query;
+
+      // Sanitize and apply full-text query
+    if (query && typeof query === "string" && query.length < 100) {
+      const trimmed = query.trim().toLowerCase();
+
+      queryBuilder.andWhere(
+        `(LOWER(club.name) ILIKE :q
+          OR LOWER(club.description) ILIKE :q
+          OR LOWER(club.address) ILIKE :q
+          OR EXISTS (
+            SELECT 1 FROM unnest(club.musicType) AS mt
+            WHERE LOWER(mt) ILIKE :q
+          )
+        )`,
+        { q: `%${trimmed}%` }
+      );
+    }
+
+    // Sanitize and filter city
+    if (typeof city === "string" && city.trim().length > 0) {
+      queryBuilder.andWhere("club.city = :city", { city: city.trim() });
+    }
+
+    // Music type filter
+    const musicArray = coerceToStringArray(musicType);
+    const validMusic = musicArray.filter(type => ALLOWED_MUSIC_TYPES.includes(type));
+    if (validMusic.length > 0) {
+      queryBuilder.andWhere("club.musicType && :musicType", { musicType: validMusic });
+    }
+
+    // Open days filter
+    const daysArray = coerceToStringArray(openDays);
+    const validDays = daysArray.filter(day => ALLOWED_DAYS.includes(day));
+    if (validDays.length > 0) {
+      queryBuilder.andWhere("club.openDays && :openDays", { openDays: validDays });
+    }
+
+    queryBuilder.orderBy("club.priority", "ASC");
+
+    const clubs = await queryBuilder.getMany();
+
+    const publicClubs = clubs.map(club => ({
+      id: club.id,
+      name: club.name,
+      description: club.description,
+      address: club.address,
+      googleMaps: club.googleMaps,
+      latitude: club.latitude,
+      longitude: club.longitude,
+      city: club.city,
+      musicType: club.musicType,
+      instagram: club.instagram,
+      whatsapp: club.whatsapp,
+      openHours: club.openHours,
+      openDays: club.openDays,
+      dressCode: club.dressCode,
+      minimumAge: club.minimumAge,
+      extraInfo: club.extraInfo,
+      profileImageUrl: club.profileImageUrl,
+      profileImageBlurhash: club.profileImageBlurhash,
+      priority: club.priority,
+    }));
+
+    res.json(publicClubs);
+  } catch (error) {
+    console.error("❌ Error filtering clubs:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 }
