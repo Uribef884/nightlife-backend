@@ -25,3 +25,4 @@ Thumbs.db
 
 # AWS credentials (if ever)
 .aws/
+*.s3-uploaded.tmp
