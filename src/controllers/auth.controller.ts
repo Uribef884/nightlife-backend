@@ -7,10 +7,11 @@ import jwt from "jsonwebtoken";
 import { isDisposableEmail } from "../utils/disposableEmailValidator";
 import { clearAnonymousCart } from "../utils/clearAnonymousCart";
 import { AuthenticatedRequest } from "../types/express";
-import { CartItem } from "../entities/CartItem";
+import { CartItem } from "../entities/TicketCartItem";
 import { authSchemaRegister } from "../schemas/auth.schema";
 import { forgotPasswordSchema, resetPasswordSchema } from "../schemas/forgot.schema";
 import { sendPasswordResetEmail } from "../services/emailService"; // ✅ to be created next
+import { MenuCartItem } from "../entities/MenuCartItem";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 const RESET_SECRET = process.env.RESET_SECRET || "dev-reset-secret";
@@ -135,10 +136,12 @@ export async function logout(req: Request, res: Response): Promise<void> {
   const userId = (req as AuthenticatedRequest).user?.id;
 
   const cartRepo = AppDataSource.getRepository(CartItem);
+  const menuCartRepo = AppDataSource.getRepository(MenuCartItem);
 
   try {
     if (userId) {
       await cartRepo.delete({ userId });
+      await menuCartRepo.delete({ userId });
       res.clearCookie("token", {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",

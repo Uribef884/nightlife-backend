@@ -3,10 +3,16 @@ import { Club } from "../entities/Club";
 import { Ticket } from "../entities/Ticket";
 import { TicketPurchase } from "../entities/TicketPurchase";
 import { User } from "../entities/User";
-import { CartItem } from "../entities/CartItem";
-import { PurchaseTransaction } from "../entities/PurchaseTransaction"; 
+import { CartItem } from "../entities/TicketCartItem";
+import { PurchaseTransaction } from "../entities/TicketPurchaseTransaction"; 
 import { Event } from "../entities/Event";
 import dotenv from "dotenv";
+import { MenuCategory } from "../entities/MenuCategory";
+import { MenuItem } from "../entities/MenuItem";
+import { MenuItemVariant } from "../entities/MenuItemVariant";
+import { MenuCartItem } from "../entities/MenuCartItem";
+import { MenuPurchase } from "../entities/MenuPurchase";
+import { MenuPurchaseTransaction } from "../entities/MenuPurchaseTransaction";
 
 dotenv.config();
 
@@ -19,5 +25,18 @@ export const AppDataSource = new DataSource({
   database: process.env.DB_NAME,
   synchronize: true,  //cambiar esta linea false
   logging: false,
-  entities: [Club, Ticket, TicketPurchase, User, CartItem, PurchaseTransaction, Event ],
+  entities: [
+    Club, 
+    Ticket, 
+    TicketPurchase, 
+    User, 
+    CartItem, 
+    PurchaseTransaction, 
+    Event, 
+    MenuCategory, 
+    MenuItem, 
+    MenuItemVariant, 
+    MenuCartItem, 
+    MenuPurchase, 
+    MenuPurchaseTransaction],
 });

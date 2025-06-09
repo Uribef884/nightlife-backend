@@ -9,10 +9,10 @@ import ticketRoutes from "./routes/ticket.routes";
 import authRoutes from "./routes/auth.routes";
 import cookieParser from "cookie-parser";
 import bouncerRoutes from "./routes/bouncer.routes";
-import cartRoutes from "./routes/cart.routes";
+import cartRoutes from "./routes/ticketCart.routes";
 import { attachSessionId } from "./middlewares/sessionMiddleware";
-import checkoutRoutes from "./routes/checkout.routes";
-import purchaseRoutes from "./routes/purchases.routes";
+import checkoutRoutes from "./routes/ticketCheckout.routes";
+import purchaseRoutes from "./routes/ticketPurchases.routes";
 import eventRoutes from "./routes/event.routes";
 
 dotenv.config();

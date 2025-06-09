@@ -10,11 +10,17 @@ if (!rawKey || rawKey.length !== 32) {
 
 const key = Buffer.from(rawKey, "utf-8"); // ✅ Use utf-8, not hex
 
-export async function generateEncryptedQR(data: object): Promise<string> {
-  const iv = randomBytes(16); // new IV per QR
+type QRPayload = {
+  type: "ticket" | "menu";
+  [key: string]: any; // ✅ allow additional fields like transactionId, email, etc.
+};
+
+export async function generateEncryptedQR(data: QRPayload): Promise<string> {
+  const iv = randomBytes(16);
   const json = JSON.stringify(data);
   const cipher = createCipheriv(algorithm, key, iv);
   const encrypted = Buffer.concat([cipher.update(json), cipher.final()]);
   const payload = Buffer.concat([iv, encrypted]).toString("base64");
-  return await QRCode.toDataURL(payload); // returns base64 QR image
+  return payload;
 }
+

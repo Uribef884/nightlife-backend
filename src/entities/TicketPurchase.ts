@@ -10,7 +10,7 @@ import {
 import { Ticket } from "./Ticket";
 import { User } from "./User";
 import { Club } from "./Club";
-import { PurchaseTransaction } from "./PurchaseTransaction";
+import { PurchaseTransaction } from "./TicketPurchaseTransaction";
 
 @Entity()
 export class TicketPurchase {
@@ -27,9 +27,6 @@ export class TicketPurchase {
   @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
   @JoinColumn({ name: "userId" })
   user?: User;
-
-  @Column({ nullable: true })
-  userId?: string;
 
   @ManyToOne(() => Club)
   @JoinColumn({ name: "clubId" })

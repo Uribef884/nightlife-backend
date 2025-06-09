@@ -8,7 +8,7 @@ import {
   OneToMany,
 } from "typeorm";
 import { Club } from "./Club";
-import { CartItem } from "./CartItem";
+import { CartItem } from "./TicketCartItem";
 import { Event } from "./Event";
 
 export enum TicketCategory {

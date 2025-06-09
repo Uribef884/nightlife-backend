@@ -10,6 +10,8 @@ import {
 import { Ticket } from "./Ticket";
 import { User } from "./User";
 import { Event } from "./Event"; 
+import { MenuCategory } from "./MenuCategory";
+import { MenuItem } from "./MenuItem";
 
 @Entity()
 export class Club {
@@ -90,4 +92,10 @@ export class Club {
 
   @OneToMany(() => Event, (event) => event.club)
   events!: Event[];
+
+  @OneToMany(() => MenuCategory, category => category.club)
+  menuCategories!: MenuCategory[];
+
+  @OneToMany(() => MenuItem, item => item.club)
+  menuItems!: MenuItem[];
 }

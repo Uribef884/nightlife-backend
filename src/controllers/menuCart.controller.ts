@@ -1,0 +1,195 @@
+import { Request, Response } from "express";
+import { AppDataSource } from "../config/data-source";
+import { MenuCartItem } from "../entities/MenuCartItem";
+import { MenuItem } from "../entities/MenuItem";
+import { MenuItemVariant } from "../entities/MenuItemVariant";
+import { computeDynamicPrice } from "../utils/dynamicPricing";
+import { AuthenticatedRequest } from "../types/express";
+
+// ✅ Ownership check for deletion
+function ownsMenuCartItem(item: MenuCartItem, userId?: string, sessionId?: string): boolean {
+  if (userId) return item.userId === userId;
+  return item.sessionId === sessionId;
+}
+
+export const addToMenuCart = async (req: Request, res: Response) => {
+  try {
+    const { menuItemId, variantId, quantity } = req.body;
+    const userId = (req as any).user?.id ?? null;
+    const sessionId = (req as any).sessionID;
+
+    if (!menuItemId || quantity == null || quantity <= 0) {
+      return res.status(400).json({ error: "Missing or invalid fields" });
+    }
+
+    const itemRepo = AppDataSource.getRepository(MenuItem);
+    const cartRepo = AppDataSource.getRepository(MenuCartItem);
+
+    const menuItem = await itemRepo.findOne({
+      where: { id: menuItemId },
+      relations: ["variants", "club"]
+    });
+
+    if (!menuItem || !menuItem.isActive) {
+      return res.status(400).json({ error: "Invalid or inactive menu item" });
+    }
+
+    if (menuItem.hasVariants && !variantId) {
+      return res.status(400).json({ error: "Variant is required for this item" });
+    }
+
+    if (!menuItem.hasVariants && variantId) {
+      return res.status(400).json({ error: "This item does not use variants" });
+    }
+
+    if (menuItem.maxPerPerson && quantity > menuItem.maxPerPerson) {
+      return res.status(400).json({
+        error: `Max per person for this item is ${menuItem.maxPerPerson}`
+      });
+    }
+
+    const basePrice = menuItem.hasVariants
+      ? menuItem.variants.find(v => v.id === variantId)?.price ?? 0
+      : menuItem.price!;
+
+    const unitPrice = computeDynamicPrice({
+      basePrice,
+      clubOpenDays: menuItem.club.openDays,
+      openHours: menuItem.club.openHours
+    });
+
+    const where = userId
+      ? { menuItemId, variantId: variantId ?? undefined, userId }
+      : { menuItemId, variantId: variantId ?? undefined, sessionId };
+
+    const existing = await cartRepo.findOne({ where });
+
+    if (existing) {
+      existing.quantity += quantity;
+      existing.unitPrice = unitPrice;
+      await cartRepo.save(existing);
+      return res.json(existing);
+    }
+
+    const newItem = new MenuCartItem();
+    newItem.menuItemId = menuItemId;
+    newItem.variantId = variantId ?? undefined;
+    newItem.userId = userId ?? undefined;
+    newItem.sessionId = userId ? undefined : sessionId;
+    newItem.quantity = quantity;
+    newItem.unitPrice = unitPrice;
+
+    await cartRepo.save(newItem);
+    res.status(201).json(newItem);
+  } catch (err) {
+    console.error("Error adding to menu cart:", err);
+    res.status(500).json({ error: "Server error adding item" });
+  }
+};
+
+export const updateMenuCartItem = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { quantity } = req.body;
+    const userId = (req as any).user?.id ?? null;
+    const sessionId = (req as any).sessionID;
+
+    if (!quantity || quantity <= 0) {
+      return res.status(400).json({ error: "Quantity must be greater than zero" });
+    }
+
+    const cartRepo = AppDataSource.getRepository(MenuCartItem);
+    const itemRepo = AppDataSource.getRepository(MenuItem);
+
+    const cartItem = await cartRepo.findOne({ where: { id } });
+    if (!cartItem) {
+      return res.status(404).json({ error: "Cart item not found" });
+    }
+
+    if (cartItem.userId !== userId && cartItem.sessionId !== sessionId) {
+      return res.status(403).json({ error: "Unauthorized to update this item" });
+    }
+
+    const menuItem = await itemRepo.findOne({
+      where: { id: cartItem.menuItemId },
+      relations: ["variants", "club"]
+    });
+
+    if (!menuItem || !menuItem.isActive) {
+      return res.status(400).json({ error: "Item no longer available" });
+    }
+
+    if (menuItem.maxPerPerson && quantity > menuItem.maxPerPerson) {
+      return res.status(400).json({
+        error: `Max per person for this item is ${menuItem.maxPerPerson}`
+      });
+    }
+
+    const basePrice = menuItem.hasVariants
+      ? menuItem.variants.find(v => v.id === cartItem.variantId)?.price ?? 0
+      : menuItem.price!;
+
+    cartItem.quantity = quantity;
+    cartItem.unitPrice = computeDynamicPrice({
+      basePrice,
+      clubOpenDays: menuItem.club.openDays,
+      openHours: menuItem.club.openHours
+    });
+
+    await cartRepo.save(cartItem);
+    res.json(cartItem);
+  } catch (err) {
+    console.error("Error updating cart item:", err);
+    res.status(500).json({ error: "Server error updating item" });
+  }
+};
+
+// ✅ GET /menu/cart — user or session
+export const getUserMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const sessionId = !userId ? (req as any).sessionID : undefined;
+
+    const cartRepo = AppDataSource.getRepository(MenuCartItem);
+    const whereClause = userId ? { userId } : { sessionId };
+
+    const items = await cartRepo.find({
+      where: whereClause,
+      relations: ["menuItem", "variant"],
+      order: { createdAt: "DESC" },
+    });
+
+    res.status(200).json(items);
+  } catch (err) {
+    console.error("❌ Error fetching menu cart:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// ✅ DELETE /menu/cart/:id — secure delete
+export const removeMenuCartItem = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+    const sessionId = !userId ? (req as any).sessionID : undefined;
+
+    const cartRepo = AppDataSource.getRepository(MenuCartItem);
+    const item = await cartRepo.findOneBy({ id });
+
+    if (!item) {
+      res.status(404).json({ error: "Menu cart item not found" });
+      return;
+    }
+
+    if (!ownsMenuCartItem(item, userId, sessionId)) {
+      res.status(403).json({ error: "You cannot delete another user's menu cart item" });
+      return;
+    }
+
+    await cartRepo.remove(item);
+    res.status(204).send();
+  } catch (err) {
+    console.error("❌ Error removing menu cart item:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};

@@ -1,6 +1,6 @@
-// src/services/emailService.ts
 import nodemailer from "nodemailer";
 import { generateTicketEmailHTML } from "../templates/ticketEmailTemplate";
+import { generateMenuEmailHTML } from "../templates/menuEmailTemplate";
 
 type TicketEmailPayload = {
   to: string;
@@ -10,6 +10,19 @@ type TicketEmailPayload = {
   clubName: string;
   index?: number;
   total?: number;
+};
+
+type MenuEmailPayload = {
+  to: string;
+  qrImageDataUrl: string;
+  clubName: string;
+  items: Array<{
+    name: string;
+    variant: string | null;
+    quantity: number;
+    unitPrice: number;
+  }>;
+  total: number;
 };
 
 const transporter = nodemailer.createTransport({
@@ -32,6 +45,17 @@ export async function sendTicketEmail(payload: TicketEmailPayload) {
     from: `"NightLife Tickets" <${process.env.SMTP_USER}>`,
     to: payload.to,
     subject: `🎟️ Your Ticket for ${payload.ticketName}`,
+    html,
+  });
+}
+
+export async function sendMenuEmail(payload: MenuEmailPayload) {
+  const html = generateMenuEmailHTML(payload);
+
+  await transporter.sendMail({
+    from: `"NightLife Menu" <${process.env.SMTP_USER}>`,
+    to: payload.to,
+    subject: `🍹 Your Menu QR from ${payload.clubName}`,
     html,
   });
 }
