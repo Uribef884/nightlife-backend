@@ -1,15 +1,20 @@
 import { Router } from "express";
 import {
-  createMenuVariant,
-  updateMenuVariant,
-  getVariantsForMenuItem,
+  getVariantsByMenuItemId,
+  createMenuItemVariant,
+  updateMenuItemVariant,
+  deleteMenuItemVariant,
 } from "../controllers/menuVariant.controller";
-import { requireClubOwnerAuth } from "../middlewares/authMiddleware";
+import { authMiddleware } from "../middlewares/authMiddleware";
 
 const router = Router();
 
-router.post("/menu/variants", requireClubOwnerAuth, createMenuVariant);
-router.patch("/menu/variants/:id", requireClubOwnerAuth, updateMenuVariant);
-router.get("/menu/variants/:menuItemId", getVariantsForMenuItem);
+// 📖 Public – Get all variants for a given menu item
+router.get("/:menuItemId", getVariantsByMenuItemId);
+
+// 🛠 Clubowner-only – CRUD for variants
+router.post("/", authMiddleware, createMenuItemVariant);
+router.patch("/:id", authMiddleware, updateMenuItemVariant);
+router.delete("/:id", authMiddleware, deleteMenuItemVariant);
 
 export default router;

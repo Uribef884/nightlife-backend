@@ -14,6 +14,12 @@ import { attachSessionId } from "./middlewares/sessionMiddleware";
 import checkoutRoutes from "./routes/ticketCheckout.routes";
 import purchaseRoutes from "./routes/ticketPurchases.routes";
 import eventRoutes from "./routes/event.routes";
+import menuCategoryRoutes from "./routes/menuCategory.routes";
+import menuItemRoutes from "./routes/menuItem.routes";
+import menuVariantRoutes from "./routes/menuVariant.routes";
+import menuCartRoutes from "./routes/menuCart.routes";
+import menuCheckoutRoutes from "./routes/menuCheckout.routes";
+import menuPurchaseRoutes from "./routes/menuPurchases.routes";
 
 dotenv.config();
 
@@ -38,6 +44,14 @@ app.use("/cart", cartRoutes);
 app.use("/checkout", checkoutRoutes);
 app.use("/purchases", purchaseRoutes);
 app.use("/events", eventRoutes);
+
+// 🔥 Menu System
+app.use("/menu/categories", menuCategoryRoutes);
+app.use("/menu/items", menuItemRoutes);
+app.use("/menu/variants", menuVariantRoutes);
+app.use("/menu/cart", menuCartRoutes);
+app.use("/menu/checkout", menuCheckoutRoutes);
+app.use("/menu/purchases", menuPurchaseRoutes);
 
 // DB Connection + Server Start
 AppDataSource.initialize()

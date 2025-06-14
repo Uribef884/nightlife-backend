@@ -1,17 +1,21 @@
+// src/routes/menuCategory.routes.ts
 import { Router } from "express";
 import {
-  createMenuCategory,
   getAllMenuCategories,
+  createMenuCategory,
   updateMenuCategory,
   deleteMenuCategory,
 } from "../controllers/menuCategory.controller";
-import { requireClubOwnerAuth } from "../middlewares/authMiddleware";
+import { authMiddleware, requireClubOwnerOrAdmin } from "../middlewares/authMiddleware";
 
 const router = Router();
 
-router.post("/menu/categories", requireClubOwnerAuth, createMenuCategory);
-router.get("/menu/categories", getAllMenuCategories);
-router.patch("/menu/categories/:id", requireClubOwnerAuth, updateMenuCategory);
-router.delete("/menu/categories/:id", requireClubOwnerAuth, deleteMenuCategory);
+// Public route to view categories by club
+router.get("/:clubId", getAllMenuCategories);
+
+// Protected routes for clubowners/admins
+router.post("/", authMiddleware, requireClubOwnerOrAdmin, createMenuCategory);
+router.patch("/:id", authMiddleware, requireClubOwnerOrAdmin, updateMenuCategory);
+router.delete("/:id", authMiddleware, requireClubOwnerOrAdmin, deleteMenuCategory);
 
 export default router;

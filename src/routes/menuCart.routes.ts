@@ -5,12 +5,13 @@ import {
   removeMenuCartItem,
   getUserMenuCart,
 } from "../controllers/menuCart.controller";
-import {  attachSessionId } from "../middlewares/authMiddleware";
+
 const router = Router();
 
-router.get("/cart", attachSessionId, getUserMenuCart);
-router.post("/cart", attachSessionId, addToMenuCart);
-router.patch("/cart", attachSessionId, updateMenuCartItem);
-router.delete("/cart/:id", attachSessionId, removeMenuCartItem);
+// Anonymous and authenticated users can use the menu cart
+router.post("/add", addToMenuCart);
+router.patch("/update", updateMenuCartItem);
+router.delete("/item/:id", removeMenuCartItem);
+router.get("/", getUserMenuCart);
 
 export default router;

@@ -2,12 +2,12 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { MenuItem } from "../entities/MenuItem";
-import { MenuItemVariant } from "../entities/MenuItemVariant";
 import { MenuPurchase } from "../entities/MenuPurchase";
 import { MenuPurchaseTransaction } from "../entities/MenuPurchaseTransaction";
 import { calculateGatewayFees, calculatePlatformFee } from "../utils/menuFeeUtils";
 import { generateEncryptedQR } from "../utils/generateEncryptedQR";
 import { User } from "../entities/User";
+import { mockValidateWompiTransaction } from "../services/mockWompiService";
 
 export const processSuccessfulMenuCheckout = async ({
   userId,
@@ -133,5 +133,30 @@ export const processSuccessfulMenuCheckout = async ({
     message: "Menu checkout initialized (pending payment)",
     transactionId: transaction.id,
     totalPaid,
+  });
+};
+
+export const confirmMockMenuCheckout = async (req: Request, res: Response): Promise<Response> => {
+  const userId = req.user?.id ?? null;
+  const sessionId = req.cookies?.sessionId ?? null;
+  const email = req.body.email;
+  const transactionId = req.body.transactionId;
+
+  if (!email || !transactionId) {
+    return res.status(400).json({ error: "Missing email or transaction ID" });
+  }
+
+  const wompiResponse = await mockValidateWompiTransaction(transactionId);
+  if (!wompiResponse.approved) {
+    return res.status(400).json({ error: "Mock transaction not approved" });
+  }
+
+  return processSuccessfulMenuCheckout({
+    userId,
+    sessionId,
+    email,
+    req,
+    res,
+    transactionId,
   });
 };

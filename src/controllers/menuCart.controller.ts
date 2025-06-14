@@ -12,14 +12,15 @@ function ownsMenuCartItem(item: MenuCartItem, userId?: string, sessionId?: strin
   return item.sessionId === sessionId;
 }
 
-export const addToMenuCart = async (req: Request, res: Response) => {
+export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { menuItemId, variantId, quantity } = req.body;
     const userId = (req as any).user?.id ?? null;
     const sessionId = (req as any).sessionID;
 
     if (!menuItemId || quantity == null || quantity <= 0) {
-      return res.status(400).json({ error: "Missing or invalid fields" });
+      res.status(400).json({ error: "Missing or invalid fields" });
+      return;
     }
 
     const itemRepo = AppDataSource.getRepository(MenuItem);
@@ -31,21 +32,25 @@ export const addToMenuCart = async (req: Request, res: Response) => {
     });
 
     if (!menuItem || !menuItem.isActive) {
-      return res.status(400).json({ error: "Invalid or inactive menu item" });
+      res.status(400).json({ error: "Invalid or inactive menu item" });
+      return;
     }
 
     if (menuItem.hasVariants && !variantId) {
-      return res.status(400).json({ error: "Variant is required for this item" });
+      res.status(400).json({ error: "Variant is required for this item" });
+      return;
     }
 
     if (!menuItem.hasVariants && variantId) {
-      return res.status(400).json({ error: "This item does not use variants" });
+      res.status(400).json({ error: "This item does not use variants" });
+      
     }
 
     if (menuItem.maxPerPerson && quantity > menuItem.maxPerPerson) {
-      return res.status(400).json({
+      res.status(400).json({
         error: `Max per person for this item is ${menuItem.maxPerPerson}`
       });
+      return;
     }
 
     const basePrice = menuItem.hasVariants
@@ -68,7 +73,8 @@ export const addToMenuCart = async (req: Request, res: Response) => {
       existing.quantity += quantity;
       existing.unitPrice = unitPrice;
       await cartRepo.save(existing);
-      return res.json(existing);
+      res.json(existing);
+      return;
     }
 
     const newItem = new MenuCartItem();
@@ -87,7 +93,7 @@ export const addToMenuCart = async (req: Request, res: Response) => {
   }
 };
 
-export const updateMenuCartItem = async (req: Request, res: Response) => {
+export const updateMenuCartItem = async(req: AuthenticatedRequest, res: Response): Promise<void>=> {
   try {
     const { id } = req.params;
     const { quantity } = req.body;
@@ -95,7 +101,8 @@ export const updateMenuCartItem = async (req: Request, res: Response) => {
     const sessionId = (req as any).sessionID;
 
     if (!quantity || quantity <= 0) {
-      return res.status(400).json({ error: "Quantity must be greater than zero" });
+      res.status(400).json({ error: "Quantity must be greater than zero" });
+      return;
     }
 
     const cartRepo = AppDataSource.getRepository(MenuCartItem);
@@ -103,11 +110,13 @@ export const updateMenuCartItem = async (req: Request, res: Response) => {
 
     const cartItem = await cartRepo.findOne({ where: { id } });
     if (!cartItem) {
-      return res.status(404).json({ error: "Cart item not found" });
+      res.status(404).json({ error: "Cart item not found" });
+      return;
     }
 
     if (cartItem.userId !== userId && cartItem.sessionId !== sessionId) {
-      return res.status(403).json({ error: "Unauthorized to update this item" });
+      res.status(403).json({ error: "Unauthorized to update this item" });
+      return;
     }
 
     const menuItem = await itemRepo.findOne({
@@ -116,13 +125,15 @@ export const updateMenuCartItem = async (req: Request, res: Response) => {
     });
 
     if (!menuItem || !menuItem.isActive) {
-      return res.status(400).json({ error: "Item no longer available" });
+      res.status(400).json({ error: "Item no longer available" });
+      return;
     }
 
     if (menuItem.maxPerPerson && quantity > menuItem.maxPerPerson) {
-      return res.status(400).json({
+      res.status(400).json({
         error: `Max per person for this item is ${menuItem.maxPerPerson}`
       });
+      return;
     }
 
     const basePrice = menuItem.hasVariants

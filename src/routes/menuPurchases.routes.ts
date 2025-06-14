@@ -1,33 +1,26 @@
 import { Router } from "express";
 import {
-  getAllMenuPurchasesAdmin,
   getUserMenuPurchases,
   getUserMenuPurchaseById,
   getClubMenuPurchases,
   getClubMenuPurchaseById,
-  validateMenuQR,
+  getAllMenuPurchasesAdmin,
+  getMenuPurchaseByIdAdmin,
 } from "../controllers/menuPurchases.controller";
-import {
-  requireAuth,
-  requireAdminAuth,
-  requireClubOwnerOrAdmin,
-  requireWaiterAuth,
-} from "../middlewares/authMiddleware";
+import { authMiddleware, requireAdminAuth, requireClubOwnerOrAdmin } from "../middlewares/authMiddleware";
 
 const router = Router();
 
-// 👤 User
-router.get("/menu/purchases", requireAuth, getUserMenuPurchases);
-router.get("/menu/purchases/:id", requireAuth, getUserMenuPurchaseById);
+// 👤 Normal users (must be logged in)
+router.get("/my", authMiddleware, getUserMenuPurchases);
+router.get("/my/:id", authMiddleware, getUserMenuPurchaseById);
 
-// 🏢 Club
-router.get("/menu/club/purchases", requireClubOwnerOrAdmin, getClubMenuPurchases);
-router.get("/menu/club/purchases/:id", requireClubOwnerOrAdmin, getClubMenuPurchaseById);
+// 🏢 Club owners (view purchases of their club)
+router.get("/club", authMiddleware, requireClubOwnerOrAdmin, getClubMenuPurchases);
+router.get("/club/:id", authMiddleware, requireClubOwnerOrAdmin, getClubMenuPurchaseById);
 
-// 🧾 Admin
-router.get("/menu/admin/purchases", requireAdminAuth, getAllMenuPurchasesAdmin);
-
-// ✅ QR Validation
-router.post("/menu/purchases/validate/:id", requireWaiterAuth, validateMenuQR);
+// 🛡 Admins only
+router.get("/admin", authMiddleware, requireAdminAuth, getAllMenuPurchasesAdmin);
+router.get("/admin/:id", authMiddleware, requireAdminAuth, getMenuPurchaseByIdAdmin);
 
 export default router;

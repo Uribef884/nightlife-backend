@@ -3,70 +3,154 @@ import { AppDataSource } from "../config/data-source";
 import { MenuItemVariant } from "../entities/MenuItemVariant";
 import { MenuItem } from "../entities/MenuItem";
 import { sanitizeInput } from "../utils/sanitizeInput";
+import { AuthenticatedRequest } from "../types/express";
 
-// PATCH /menu/variants/:id
-export const updateMenuItemVariant = async (req: Request, res: Response) => {
+export const getVariantsByMenuItemId = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const user = req.user;
-    const { name, price } = req.body;
+    const { menuItemId } = req.params;
+    const variantRepo = AppDataSource.getRepository(MenuItemVariant);
+    const variants = await variantRepo.find({
+      where: { menuItemId },
+      order: { name: "ASC" },
+    });
+    res.json(variants);
+  } catch (err) {
+    console.error("Error fetching variants:", err);
+    res.status(500).json({ error: "Failed to load variants" });
+  }
+};
 
+export const createMenuItemVariant = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
     if (!user || user.role !== "clubowner") {
-      return res.status(403).json({ error: "Only club owners can update variants" });
+      res.status(403).json({ error: "Only club owners can create variants" });
+      return;
     }
 
-    const variantRepo = AppDataSource.getRepository(MenuItemVariant);
-    const variant = await variantRepo.findOne({
-      where: { id },
-      relations: ["menuItem"]
-    });
+    const { menuItemId, name, price } = req.body;
+    const sanitized = sanitizeInput(name);
 
-    if (!variant) {
-      return res.status(404).json({ error: "Variant not found" });
+    if (!sanitized || typeof price !== "number" || price <= 0) {
+      res.status(400).json({ error: "Variant name and positive price are required" });
+      return;
     }
 
     const itemRepo = AppDataSource.getRepository(MenuItem);
-    const item = await itemRepo.findOne({
-      where: { id: variant.menuItemId },
-      relations: ["club"]
+    const variantRepo = AppDataSource.getRepository(MenuItemVariant);
+
+    const menuItem = await itemRepo.findOneBy({ id: menuItemId });
+    if (!menuItem || menuItem.clubId !== user.clubId) {
+      res.status(403).json({ error: "Unauthorized or menu item not found" });
+      return;
+    }
+
+    const existing = await variantRepo.findOne({ where: { name: sanitized, menuItemId } });
+    if (existing) {
+      res.status(400).json({ error: "Variant name must be unique for this item" });
+      return;
+    }
+
+    const variant = variantRepo.create({
+      name: sanitized,
+      price,
+      menuItemId,
     });
 
-    if (!item || item.clubId !== user.clubId) {
-      return res.status(403).json({ error: "Unauthorized to modify this variant" });
+    await variantRepo.save(variant);
+    res.status(201).json(variant);
+  } catch (err) {
+    console.error("Error creating variant:", err);
+    res.status(500).json({ error: "Server error creating variant" });
+  }
+};
+
+export const updateMenuItemVariant = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    const { id } = req.params;
+    const { name, price } = req.body;
+
+    if (!user || user.role !== "clubowner") {
+      res.status(403).json({ error: "Only club owners can update variants" });
+      return;
+    }
+
+    const variantRepo = AppDataSource.getRepository(MenuItemVariant);
+    const itemRepo = AppDataSource.getRepository(MenuItem);
+
+    const variant = await variantRepo.findOneBy({ id });
+    if (!variant) {
+      res.status(404).json({ error: "Variant not found" });
+      return;
+    }
+
+    const menuItem = await itemRepo.findOneBy({ id: variant.menuItemId });
+    if (!menuItem || menuItem.clubId !== user.clubId) {
+      res.status(403).json({ error: "Unauthorized or item not found" });
+      return;
     }
 
     if (typeof name === "string") {
-      const cleanName = sanitizeInput(name);
-      if (!cleanName) {
-        return res.status(400).json({ error: "Name is required" });
+      const sanitized = sanitizeInput(name);
+      if (!sanitized) {
+        res.status(400).json({ error: "Variant name is invalid" });
+        return;
       }
-
-      // Check uniqueness within this MenuItem
-      const existing = await variantRepo.findOne({
-        where: {
-          name: cleanName,
-          menuItemId: variant.menuItemId
-        }
-      });
-
+      const existing = await variantRepo.findOne({ where: { name: sanitized, menuItemId: menuItem.id } });
       if (existing && existing.id !== variant.id) {
-        return res.status(409).json({ error: "Name must be unique for this item" });
+        res.status(400).json({ error: "Variant name must be unique" });
+        return;
       }
-
-      variant.name = cleanName;
+      variant.name = sanitized;
     }
 
-    if (typeof price === "number") {
-      if (price <= 0) {
-        return res.status(400).json({ error: "Price must be greater than 0" });
+    if (price != null) {
+      const parsedPrice = parseFloat(price);
+      if (isNaN(parsedPrice) || parsedPrice < 0) {
+        res.status(400).json({ error: "Price must be a non-negative number" });
+        return;
       }
-      variant.price = price;
+      variant.price = parsedPrice;
     }
 
     await variantRepo.save(variant);
     res.json(variant);
   } catch (err) {
     console.error("Error updating variant:", err);
-    res.status(500).json({ error: "Server error updating variant" });
+    res.status(500).json({ error: "Failed to update variant" });
+  }
+};
+
+export const deleteMenuItemVariant = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    const { id } = req.params;
+
+    if (!user || user.role !== "clubowner") {
+      res.status(403).json({ error: "Only club owners can delete variants" });
+      return;
+    }
+
+    const variantRepo = AppDataSource.getRepository(MenuItemVariant);
+    const itemRepo = AppDataSource.getRepository(MenuItem);
+
+    const variant = await variantRepo.findOneBy({ id });
+    if (!variant) {
+      res.status(404).json({ error: "Variant not found" });
+      return;
+    }
+
+    const item = await itemRepo.findOneBy({ id: variant.menuItemId });
+    if (!item || item.clubId !== user.clubId) {
+      res.status(403).json({ error: "Unauthorized to delete this variant" });
+      return;
+    }
+
+    await variantRepo.remove(variant);
+    res.json({ message: "Variant deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting variant:", err);
+    res.status(500).json({ error: "Server error deleting variant" });
   }
 };

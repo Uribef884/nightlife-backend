@@ -6,6 +6,7 @@ import {
 import { authMiddleware } from "../middlewares/authMiddleware";
 import { optionalAuthMiddleware } from "../middlewares/optionalAuthMiddleware";
 import { initiateMockCheckout } from "../controllers/ticketInitiate.controller"; // rememeber to switch and delete everything related to mock checkout
+
 const router = Router();
 
 // 🛒 Legacy one-step checkout (no payment)

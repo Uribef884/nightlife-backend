@@ -1,49 +1,27 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany } from 'typeorm';
-import { Club } from './Club';
-import { MenuItemVariant } from './MenuItemVariant';
-import { MenuCategory } from './MenuCategory';
+import { Router } from "express";
+import {
+  createMenuItem,
+  updateMenuItem,
+  deleteMenuItem,
+  getAllMenuItems,
+  getMenuItemById,
+  getItemsForMyClub,
+  getMenuForClub
+} from "../controllers/menuItem.controller";
+import { authMiddleware, requireClubOwnerOrAdmin } from "../middlewares/authMiddleware";
 
-@Entity()
-export class MenuItem {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
+const router = Router();
 
-  @Column()
-  name!: string;
+// Public routes
+router.get("/all", getAllMenuItems);  //Returns all menu items across all clubs (only active items, with active variants).
+router.get("/:id", getMenuItemById);
+router.get("/club/:clubId", getMenuForClub);
 
-  @Column({ nullable: true })
-  description?: string;
 
-  @Column({ nullable: true })
-  imageUrl?: string;
+// Clubowner routes
+router.get("/my/items", authMiddleware, requireClubOwnerOrAdmin, getItemsForMyClub);
+router.post("/", authMiddleware, requireClubOwnerOrAdmin, createMenuItem);
+router.patch("/:id", authMiddleware, requireClubOwnerOrAdmin, updateMenuItem);
+router.delete("/:id", authMiddleware, requireClubOwnerOrAdmin, deleteMenuItem);
 
-  @Column({ type: 'decimal', nullable: true })
-  price?: number; // optional if hasVariants is true
-
-  @Column({ default: false })
-  dynamicPricingEnabled!: boolean;
-
-  @ManyToOne(() => Club, (club) => club.menuItems)
-  club!: Club;
-  
-  @Column()
-  clubId!: string;
-
-  @Column()
-  categoryId!: string;
-  
-  @Column("int")
-  maxPerPerson!: number;
-
-  @ManyToOne(() => MenuCategory, (category) => category.items)
-  category!: MenuCategory;
-
-  @Column({ default: false })
-  hasVariants!: boolean;
-
-  @OneToMany(() => MenuItemVariant, (variant) => variant.menuItem)
-  variants!: MenuItemVariant[];
-
-  @Column({ default: true })
-  isActive!: boolean;
-}
+export default router;

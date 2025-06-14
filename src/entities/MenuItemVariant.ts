@@ -18,6 +18,9 @@ export class MenuItemVariant {
   @Column()
   menuItemId!: string;
 
+  @Column({ default: true })
+  isActive!: boolean;
+
   @ManyToOne(() => MenuItem, (item) => item.variants)
   menuItem!: MenuItem;
 }

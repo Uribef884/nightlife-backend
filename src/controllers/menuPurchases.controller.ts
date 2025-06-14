@@ -84,13 +84,13 @@ async function findMenuTransactions(where: any, role: Role, query: any): Promise
 }
 
 // 🧑 Normal User
-export const getUserMenuPurchases = async (req: AuthenticatedRequest, res: Response) => {
+export const getUserMenuPurchases = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const userId = req.user!.id;
   const results = await findMenuTransactions({ user: { id: userId } }, "user", req.query);
   res.json(results.map((tx) => formatTransaction(tx, "user")));
 };
 
-export const getUserMenuPurchaseById = async (req: AuthenticatedRequest, res: Response) => {
+export const getUserMenuPurchaseById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const id = req.params.id;
   const userId = req.user!.id;
   const txRepo = AppDataSource.getRepository(MenuPurchaseTransaction);
@@ -100,20 +100,26 @@ export const getUserMenuPurchaseById = async (req: AuthenticatedRequest, res: Re
     relations: ["purchases", "purchases.menuItem", "purchases.variant"],
   });
 
-  if (!tx) return res.status(404).json({ error: "Not found" });
+  if (!tx)  {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
   res.json(formatTransaction(tx, "user"));
 };
 
 // 🏢 Club Owner
-export const getClubMenuPurchases = async (req: AuthenticatedRequest, res: Response) => {
+export const getClubMenuPurchases = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const clubId = req.user?.clubId;
-  if (!clubId) return res.status(403).json({ error: "No club ID assigned" });
+  if (!clubId)  {
+    res.status(403).json({ error: "No club ID assigned" });
+    return;
+  }
 
   const txs = await findMenuTransactions({ clubId }, "clubowner", req.query);
   res.json(txs.map((tx) => formatTransaction(tx, "clubowner")));
 };
 
-export const getClubMenuPurchaseById = async (req: AuthenticatedRequest, res: Response) => {
+export const getClubMenuPurchaseById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const id = req.params.id;
   const clubId = req.user?.clubId;
   const txRepo = AppDataSource.getRepository(MenuPurchaseTransaction);
@@ -123,17 +129,20 @@ export const getClubMenuPurchaseById = async (req: AuthenticatedRequest, res: Re
     relations: ["purchases", "purchases.menuItem", "purchases.variant"],
   });
 
-  if (!tx) return res.status(404).json({ error: "Not found or unauthorized" });
+  if (!tx) {
+    res.status(404).json({ error: "Not found or unauthorized" });
+    return;
+  }
   res.json(formatTransaction(tx, "clubowner"));
 };
 
 // 🛡 Admin
-export const getAllMenuPurchasesAdmin = async (req: AuthenticatedRequest, res: Response) => {
+export const getAllMenuPurchasesAdmin = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const txs = await findMenuTransactions({}, "admin", req.query);
   res.json(txs.map((tx) => formatTransaction(tx, "admin")));
 };
 
-export const getMenuPurchaseByIdAdmin = async (req: AuthenticatedRequest, res: Response) => {
+export const getMenuPurchaseByIdAdmin = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const id = req.params.id;
   const txRepo = AppDataSource.getRepository(MenuPurchaseTransaction);
 
@@ -142,6 +151,9 @@ export const getMenuPurchaseByIdAdmin = async (req: AuthenticatedRequest, res: R
     relations: ["purchases", "purchases.menuItem", "purchases.variant"],
   });
 
-  if (!tx) return res.status(404).json({ error: "Not found" });
+  if (!tx) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  } 
   res.json(formatTransaction(tx, "admin"));
 };

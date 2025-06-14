@@ -4,6 +4,7 @@ import { MenuCategory } from "../entities/MenuCategory";
 import { MenuItem } from "../entities/MenuItem";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { sanitizeInput } from "../utils/sanitizeInput";
+import { AuthenticatedRequest } from "../types/express";
 
 export const getAllMenuCategories = async (req: Request, res: Response) => {
   try {
@@ -31,22 +32,25 @@ export const getAllMenuCategories = async (req: Request, res: Response) => {
   }
 };
 
-export const createMenuCategory = async (req: Request, res: Response) => {
+export const createMenuCategory = async (req: Request, res: Response): Promise<void>  => {
   try {
     const { name } = req.body;
     const user = req.user;
 
     if (!user || user.role !== "clubowner") {
-      return res.status(403).json({ error: "Only club owners can create categories" });
+      res.status(403).json({ error: "Only club owners can create categories" });
+      return;
     }
 
     if (!user.clubId) {
-      return res.status(403).json({ error: "Club ID is required" });
+      res.status(403).json({ error: "Club ID is required" });
+      return;
     }
 
     const sanitized = sanitizeInput(name);
     if (!sanitized) {
-      return res.status(400).json({ error: "Name is required" });
+      res.status(400).json({ error: "Name is required" });
+      return;
     }
 
     const newCategory = new MenuCategory();
@@ -63,26 +67,29 @@ export const createMenuCategory = async (req: Request, res: Response) => {
   }
 };
 
-export const updateMenuCategory = async (req: Request, res: Response) => {
+export const updateMenuCategory = async (req: Request, res: Response): Promise<void>  => {
   try {
     const { id } = req.params;
     const { name } = req.body;
     const user = req.user;
 
     if (!user || user.role !== "clubowner") {
-      return res.status(403).json({ error: "Only club owners can update categories" });
+      res.status(403).json({ error: "Only club owners can update categories" });
+      return;
     }
 
     const repo = AppDataSource.getRepository(MenuCategory);
     const category = await repo.findOne({ where: { id }, relations: ["club"] });
 
     if (!category || category.club.id !== user.clubId) {
-      return res.status(403).json({ error: "You can only update your own categories" });
+      res.status(403).json({ error: "You can only update your own categories" });
+      return;
     }
 
     const sanitized = sanitizeInput(name);
     if (!sanitized) {
-      return res.status(400).json({ error: "Name is required" });
+      res.status(400).json({ error: "Name is required" });
+      return;
     }
 
     category.name = sanitized;
@@ -95,20 +102,22 @@ export const updateMenuCategory = async (req: Request, res: Response) => {
   }
 };
 
-export const deleteMenuCategory = async (req: Request, res: Response) => {
+export const deleteMenuCategory = async (req: Request, res: Response): Promise<void>  => {
   try {
     const { id } = req.params;
     const user = req.user;
 
     if (!user || user.role !== "clubowner") {
-      return res.status(403).json({ error: "Only club owners can delete categories" });
+      res.status(403).json({ error: "Only club owners can delete categories" });
+      return;
     }
 
     const repo = AppDataSource.getRepository(MenuCategory);
     const category = await repo.findOne({ where: { id }, relations: ["club"] });
 
     if (!category || category.club.id !== user.clubId) {
-      return res.status(403).json({ error: "You can only delete your own categories" });
+      res.status(403).json({ error: "You can only delete your own categories" });
+      return;
     }
 
     await repo.remove(category);

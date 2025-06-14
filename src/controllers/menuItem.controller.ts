@@ -2,9 +2,11 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { MenuItem } from "../entities/MenuItem";
 import { MenuCategory } from "../entities/MenuCategory";
+import { MenuItemVariant } from "../entities/MenuItemVariant";
+import { AuthenticatedRequest } from "../types/express";
 import { sanitizeInput } from "../utils/sanitizeInput";
 
-export const createMenuItem = async (req: Request, res: Response) => {
+export const createMenuItem = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user;
     const {
@@ -19,12 +21,14 @@ export const createMenuItem = async (req: Request, res: Response) => {
     } = req.body;
 
     if (!user || user.role !== "clubowner") {
-      return res.status(403).json({ error: "Only club owners can create menu items" });
+      res.status(403).json({ error: "Only club owners can create menu items" });
+      return;
     }
 
     const sanitizedName = sanitizeInput(name);
     if (!sanitizedName) {
-      return res.status(400).json({ error: "Name is required" });
+      res.status(400).json({ error: "Name is required" });
+      return;
     }
 
     const category = await AppDataSource.getRepository(MenuCategory).findOne({
@@ -33,19 +37,23 @@ export const createMenuItem = async (req: Request, res: Response) => {
     });
 
     if (!category || category.club.id !== user.clubId) {
-      return res.status(403).json({ error: "Invalid category or not owned by your club" });
+      res.status(403).json({ error: "Invalid category or not owned by your club" });
+      return;
     }
 
     if (hasVariants && price !== null) {
-      return res.status(400).json({ error: "Price must be null when hasVariants is true" });
+      res.status(400).json({ error: "Price must be null when hasVariants is true" });
+      return;
     }
 
     if (!hasVariants && (typeof price !== "number" || price <= 0)) {
-      return res.status(400).json({ error: "Price must be a positive number if hasVariants is false" });
+      res.status(400).json({ error: "Price must be a positive number if hasVariants is false" });
+      return;
     }
 
     if (typeof maxPerPerson !== "number" || maxPerPerson <= 0) {
-      return res.status(400).json({ error: "maxPerPerson must be a positive number" });
+      res.status(400).json({ error: "maxPerPerson must be a positive number" });
+      return;
     }
 
     const item = new MenuItem();
@@ -68,7 +76,7 @@ export const createMenuItem = async (req: Request, res: Response) => {
   }
 };
 
-export const updateMenuItem = async (req: Request, res: Response) => {
+export const updateMenuItem = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user;
     const { id } = req.params;
@@ -83,7 +91,8 @@ export const updateMenuItem = async (req: Request, res: Response) => {
     } = req.body;
 
     if (!user || user.role !== "clubowner") {
-      return res.status(403).json({ error: "Only club owners can update menu items" });
+      res.status(403).json({ error: "Only club owners can update menu items" });
+      return;
     }
 
     const repo = AppDataSource.getRepository(MenuItem);
@@ -93,13 +102,20 @@ export const updateMenuItem = async (req: Request, res: Response) => {
     });
 
     if (!item || item.clubId !== user.clubId) {
-      return res.status(403).json({ error: "Item not found or not owned by your club" });
+      res.status(403).json({ error: "Item not found or not owned by your club" });
+      return;
+    }
+
+    if (typeof hasVariants === "boolean" && hasVariants !== item.hasVariants) {
+      res.status(400).json({ error: "Cannot change hasVariants after item creation" });
+      return;
     }
 
     if (typeof name === "string") {
       const sanitizedName = sanitizeInput(name);
       if (!sanitizedName) {
-        return res.status(400).json({ error: "Name is required" });
+        res.status(400).json({ error: "Name is required" });
+        return;
       }
       item.name = sanitizedName;
     }
@@ -112,23 +128,23 @@ export const updateMenuItem = async (req: Request, res: Response) => {
       item.imageUrl = imageUrl;
     }
 
-    if (typeof hasVariants === "boolean") {
-      item.hasVariants = hasVariants;
-
-      if (hasVariants && price !== null) {
-        return res.status(400).json({ error: "Price must be null when hasVariants is true" });
+    if (item.hasVariants) {
+      if (price !== null) {
+        res.status(400).json({ error: "Price must be null when hasVariants is true" });
+        return;
       }
-
-      if (!hasVariants && (typeof price !== "number" || price <= 0)) {
-        return res.status(400).json({ error: "Price must be a positive number if hasVariants is false" });
+    } else {
+      if (typeof price !== "number" || price <= 0) {
+        res.status(400).json({ error: "Price must be a positive number if hasVariants is false" });
+        return;
       }
-
-      item.price = hasVariants ? null : price;
+      item.price = price;
     }
 
     if (typeof maxPerPerson === "number") {
       if (maxPerPerson <= 0) {
-        return res.status(400).json({ error: "maxPerPerson must be positive" });
+        res.status(400).json({ error: "maxPerPerson must be positive" });
+        return;
       }
       item.maxPerPerson = maxPerPerson;
     }
@@ -142,5 +158,145 @@ export const updateMenuItem = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("Error updating menu item:", err);
     res.status(500).json({ error: "Server error updating item" });
+  }
+};
+
+export const getAllMenuItems = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const repo = AppDataSource.getRepository(MenuItem);
+    const items = await repo.find({
+      where: { isActive: true },
+      relations: ["variants"],
+      order: { name: "ASC" },
+    });
+
+    // Filter out inactive variants
+    items.forEach(item => {
+      if (item.variants) {
+        item.variants = item.variants.filter(v => v.isActive);
+      }
+    });
+
+    res.json(items);
+  } catch (err) {
+    console.error("Error fetching all menu items:", err);
+    res.status(500).json({ error: "Failed to load menu items" });
+  }
+};
+
+export const getMenuItemById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const repo = AppDataSource.getRepository(MenuItem);
+    const item = await repo.findOne({
+      where: { id },
+      relations: ["category", "club", "variants"],
+    });
+
+    if (!item) {
+      res.status(404).json({ error: "Menu item not found" });
+      return;
+    }
+
+    // Filter inactive variants
+    item.variants = item.variants?.filter(v => v.isActive) ?? [];
+
+    res.json(item);
+  } catch (err) {
+    console.error("Error fetching menu item by ID:", err);
+    res.status(500).json({ error: "Failed to load menu item" });
+  }
+};
+
+export const getItemsForMyClub = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    if (!user || user.role !== "clubowner") {
+      res.status(403).json({ error: "Only club owners can access this" });
+      return;
+    }
+
+    const repo = AppDataSource.getRepository(MenuItem);
+    const items = await repo.find({
+      where: {
+        clubId: user.clubId,
+        isActive: true,
+      },
+      relations: ["category", "variants"],
+      order: { name: "ASC" },
+    });
+
+    items.forEach(item => {
+      if (item.variants) {
+        item.variants = item.variants.filter(v => v.isActive);
+      }
+    });
+
+    res.json(items);
+  } catch (err) {
+    console.error("Error fetching items for my club:", err);
+    res.status(500).json({ error: "Failed to load your menu items" });
+  }
+};
+
+export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    const { id } = req.params;
+
+    if (!user || user.role !== "clubowner") {
+      res.status(403).json({ error: "Only club owners can delete menu items" });
+      return;
+    }
+
+    const itemRepo = AppDataSource.getRepository(MenuItem);
+    const variantRepo = AppDataSource.getRepository(MenuItemVariant);
+
+    const item = await itemRepo.findOne({ where: { id } });
+
+    if (!item || item.clubId !== user.clubId) {
+      res.status(403).json({ error: "Item not found or not owned by your club" });
+      return;
+    }
+
+    await variantRepo.delete({ menuItemId: id });
+    await itemRepo.remove(item);
+
+    res.json({ message: "Menu item and variants deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting menu item:", err);
+    res.status(500).json({ error: "Failed to delete menu item" });
+  }
+};
+
+export const getMenuForClub = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { clubId } = req.params;
+    const repo = AppDataSource.getRepository(MenuItem);
+
+    const items = await repo.find({
+      where: {
+        clubId,
+        isActive: true,
+      },
+      relations: ["category", "variants"],
+      order: {
+        category: {
+          name: "ASC",
+        },
+        name: "ASC",
+      },
+    });
+
+    items.forEach(item => {
+      if (item.variants) {
+        item.variants = item.variants.filter(v => v.isActive);
+      }
+    });
+
+    res.json(items);
+  } catch (err) {
+    console.error("Error loading menu for club:", err);
+    res.status(500).json({ error: "Failed to load club menu" });
   }
 };
