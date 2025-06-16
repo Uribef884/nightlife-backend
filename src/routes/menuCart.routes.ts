@@ -4,6 +4,7 @@ import {
   updateMenuCartItem,
   removeMenuCartItem,
   getUserMenuCart,
+  clearMenuCart
 } from "../controllers/menuCart.controller";
 
 const router = Router();
@@ -13,5 +14,6 @@ router.post("/add", addToMenuCart);
 router.patch("/update", updateMenuCartItem);
 router.delete("/item/:id", removeMenuCartItem);
 router.get("/", getUserMenuCart);
+router.delete("/clear", clearMenuCart);  //Used if user want to add tickets to existing menu cart
 
 export default router;

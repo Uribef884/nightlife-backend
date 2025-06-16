@@ -31,6 +31,9 @@ export class Ticket {
   @Column("decimal")
   price!: number;
 
+  @Column({ default: false })
+  dynamicPricingEnabled!: boolean;
+
   @Column("int")
   maxPerPerson!: number;
 

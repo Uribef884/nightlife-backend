@@ -69,3 +69,26 @@ export function computeDynamicPrice(input: DynamicPriceInput): number {
 
   return basePrice;
 }
+
+/**
+ * Dynamic pricing for general covers (based on club open status and hours)
+ */
+export function computeDynamicCoverPrice(input: Omit<DynamicPriceInput, 'useDateBasedLogic'>): number {
+  return computeDynamicPrice({ ...input, useDateBasedLogic: false });
+}
+
+/**
+ * Dynamic pricing for event tickets (based on days until event)
+ */
+export function computeDynamicEventPrice(basePrice: number, eventDate: Date): number {
+  const now = new Date();
+  const daysUntilEvent = Math.floor(
+    (eventDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (daysUntilEvent > 14) return Math.round(basePrice * 0.8 * 100) / 100;  // early bird
+  if (daysUntilEvent > 7)  return Math.round(basePrice * 0.9 * 100) / 100;  // minor discount
+  if (daysUntilEvent <= 3) return Math.round(basePrice * 1.1 * 100) / 100;  // urgency bump
+
+  return basePrice; // standard price
+}

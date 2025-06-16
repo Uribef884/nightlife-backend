@@ -29,6 +29,9 @@ export class CartItem {
   @Column()
   quantity!: number;
 
+  @Column("decimal", { nullable: true })
+  unitPrice?: number;
+
 //  @Column("decimal", { nullable: true }) //Gotta check this when we implement dynamic pricing
 //  unitPrice?: number;
 

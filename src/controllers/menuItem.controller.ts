@@ -269,7 +269,39 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
   }
 };
 
-export const getMenuForClub = async (req: Request, res: Response): Promise<void> => {
+  export const getMenuForClub = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { clubId } = req.params;
+      const repo = AppDataSource.getRepository(MenuItem);
+
+      const items = await repo.find({
+        where: {
+          clubId,
+          isActive: true,
+        },
+        relations: ["category", "variants"],
+        order: {
+          category: {
+            name: "ASC",
+          },
+          name: "ASC",
+        },
+      });
+
+      items.forEach(item => {
+        if (item.variants) {
+          item.variants = item.variants.filter(v => v.isActive);
+        }
+      });
+
+      res.json(items);
+    } catch (err) {
+      console.error("Error loading menu for club:", err);
+      res.status(500).json({ error: "Failed to load club menu" });
+    }
+  };
+
+  export const getPublicMenuForClub = async (req: Request, res: Response): Promise<void> => {
   try {
     const { clubId } = req.params;
     const repo = AppDataSource.getRepository(MenuItem);
@@ -281,22 +313,39 @@ export const getMenuForClub = async (req: Request, res: Response): Promise<void>
       },
       relations: ["category", "variants"],
       order: {
-        category: {
-          name: "ASC",
-        },
+        category: { name: "ASC" },
         name: "ASC",
       },
     });
 
+    // Filter inactive variants and group by category
+    const grouped: Record<string, any[]> = {};
+
     items.forEach(item => {
-      if (item.variants) {
-        item.variants = item.variants.filter(v => v.isActive);
-      }
+      const variants = item.variants?.filter(v => v.isActive) ?? [];
+
+      const publicItem = {
+        name: item.name,
+        description: item.description,
+        imageUrl: item.imageUrl,
+        price: item.hasVariants ? null : item.price,
+        dynamicPricingEnabled: item.dynamicPricingEnabled,
+        variants: item.hasVariants ? variants.map(v => ({ name: v.name, price: v.price })) : [],
+      };
+
+      const catName = item.category?.name || "Uncategorized";
+      if (!grouped[catName]) grouped[catName] = [];
+      grouped[catName].push(publicItem);
     });
 
-    res.json(items);
+    const result = Object.entries(grouped).map(([category, items]) => ({
+      category,
+      items,
+    }));
+
+    res.json(result);
   } catch (err) {
-    console.error("Error loading menu for club:", err);
-    res.status(500).json({ error: "Failed to load club menu" });
+    console.error("Error loading public menu:", err);
+    res.status(500).json({ error: "Failed to load public menu" });
   }
 };

@@ -10,7 +10,7 @@ export const getVariantsByMenuItemId = async (req: Request, res: Response): Prom
     const { menuItemId } = req.params;
     const variantRepo = AppDataSource.getRepository(MenuItemVariant);
     const variants = await variantRepo.find({
-      where: { menuItemId },
+      where: { menuItemId, isActive: true },
       order: { name: "ASC" },
     });
     res.json(variants);
@@ -55,6 +55,7 @@ export const createMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
       name: sanitized,
       price,
       menuItemId,
+      isActive: true,
     });
 
     await variantRepo.save(variant);
@@ -69,7 +70,7 @@ export const updateMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
   try {
     const user = req.user;
     const { id } = req.params;
-    const { name, price } = req.body;
+    const { name, price, isActive } = req.body;
 
     if (!user || user.role !== "clubowner") {
       res.status(403).json({ error: "Only club owners can update variants" });
@@ -112,6 +113,10 @@ export const updateMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
         return;
       }
       variant.price = parsedPrice;
+    }
+
+    if (typeof isActive === "boolean") {
+      variant.isActive = isActive;
     }
 
     await variantRepo.save(variant);

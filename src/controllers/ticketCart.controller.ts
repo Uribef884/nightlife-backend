@@ -2,6 +2,7 @@ import { Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { CartItem } from "../entities/TicketCartItem";
 import { AuthenticatedRequest } from "../types/express";
+import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { Ticket } from "../entities/Ticket";
 import { toZonedTime, format } from "date-fns-tz";
 
@@ -40,7 +41,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
 
     const ticket = await ticketRepo.findOne({
       where: { id: ticketId },
-      relations: ["club"],
+      relations: ["club", "event"]
     });
 
     if (!ticket) {
@@ -60,7 +61,6 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
         ? new Date(ticket.availableDate).toISOString().split("T")[0]
         : undefined;
 
-    // 🧠 Free ticket must match availableDate
     if (isFree) {
       if (!ticketDate || ticketDate !== date) {
         res.status(400).json({ error: "This free ticket is only valid on its available date" });
@@ -68,7 +68,6 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       }
     }
 
-    // 🧠 Block general tickets when special event exists on same day (but allow free)
     if (!isFree && !ticket.availableDate && ticket.category === "general") {
       const conflictEvent = await ticketRepo.findOne({
         where: {
@@ -85,7 +84,6 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
         return;
       }
 
-      // Validate 3-week max
       const maxDateStr = new Date(Date.now() + 21 * 86400000).toISOString().split("T")[0];
       if (date > maxDateStr) {
         res.status(400).json({ error: "You can only select dates within 3 weeks" });
@@ -149,6 +147,14 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       }
     }
 
+    const unitPrice = computeDynamicPrice({
+      basePrice: ticket.price,
+      clubOpenDays: ticket.club.openDays,
+      openHours: ticket.club.openHours,
+      availableDate: new Date(`${date}T00:00:00`),
+      useDateBasedLogic: !!ticket.eventId
+    });
+
     const existing = await cartRepo.findOne({
       where: userId
         ? { userId, ticketId, date }
@@ -157,6 +163,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
 
     if (existing) {
       existing.quantity += quantity;
+      existing.unitPrice = unitPrice;
       await cartRepo.save(existing);
       res.status(200).json(existing);
       return;
@@ -167,6 +174,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       ticket,
       date,
       quantity,
+      unitPrice,
       ...(userId ? { userId } : { sessionId }),
     });
 
@@ -284,12 +292,56 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
 
     const items = await cartRepo.find({
       where: whereClause,
+      relations: ["ticket", "ticket.club"],
       order: { createdAt: "DESC" },
     });
 
-    res.status(200).json(items);
+    const formatted = items.map(item => {
+      const ticket = item.ticket;
+      const basePrice = ticket.price;
+
+      const currentPrice = computeDynamicPrice({
+        basePrice,
+        clubOpenDays: ticket.club.openDays,
+        openHours: ticket.club.openHours,
+        availableDate: new Date(`${item.date}T00:00:00`),
+        useDateBasedLogic: !!ticket.eventId
+      });
+
+      const discountApplied = Math.max(0, Math.round((basePrice - currentPrice) * 100) / 100);
+
+      return {
+        id: item.id,
+        ticketId: item.ticketId,
+        quantity: item.quantity,
+        date: item.date,
+        unitPrice: item.unitPrice, // stored at time of add
+        currentPrice,
+        discountApplied,
+        ticket,
+      };
+    });
+
+    res.status(200).json(formatted);
   } catch (err) {
     console.error("❌ Error fetching cart:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+//Used if user want to add menuitem to existing ticket cart
+export const clearCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const sessionId = !userId ? (req as any).sessionId : undefined;
+
+    const cartRepo = AppDataSource.getRepository(CartItem);
+    const whereClause = userId ? { userId } : { sessionId };
+
+    await cartRepo.delete(whereClause);
+    res.status(204).send();
+  } catch (err) {
+    console.error("❌ Error clearing ticket cart:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };

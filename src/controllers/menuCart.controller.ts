@@ -2,9 +2,9 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { MenuItem } from "../entities/MenuItem";
-import { MenuItemVariant } from "../entities/MenuItemVariant";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { AuthenticatedRequest } from "../types/express";
+import { CartItem } from "../entities/TicketCartItem";
 
 // ✅ Ownership check for deletion
 function ownsMenuCartItem(item: MenuCartItem, userId?: string, sessionId?: string): boolean {
@@ -12,14 +12,23 @@ function ownsMenuCartItem(item: MenuCartItem, userId?: string, sessionId?: strin
   return item.sessionId === sessionId;
 }
 
+// New function
 export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { menuItemId, variantId, quantity } = req.body;
-    const userId = (req as any).user?.id ?? null;
-    const sessionId = (req as any).sessionID;
+    const userId = req.user?.id ?? null;
+    const sessionId = !userId ? (req as any).sessionID : undefined;
 
     if (!menuItemId || quantity == null || quantity <= 0) {
       res.status(400).json({ error: "Missing or invalid fields" });
+      return;
+    }
+
+    // 🛑 Enforce cart exclusivity
+    const ticketCartRepo = AppDataSource.getRepository(CartItem);
+    const existingTicketItems = await ticketCartRepo.find({ where: userId ? { userId } : { sessionId } });
+    if (existingTicketItems.length > 0) {
+      res.status(400).json({ error: "You must complete or clear your ticket cart before ordering menu items." });
       return;
     }
 
@@ -43,13 +52,11 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
 
     if (!menuItem.hasVariants && variantId) {
       res.status(400).json({ error: "This item does not use variants" });
-      
+      return;
     }
 
     if (menuItem.maxPerPerson && quantity > menuItem.maxPerPerson) {
-      res.status(400).json({
-        error: `Max per person for this item is ${menuItem.maxPerPerson}`
-      });
+      res.status(400).json({ error: `Max per person for this item is ${menuItem.maxPerPerson}` });
       return;
     }
 
@@ -81,7 +88,7 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
     newItem.menuItemId = menuItemId;
     newItem.variantId = variantId ?? undefined;
     newItem.userId = userId ?? undefined;
-    newItem.sessionId = userId ? undefined : sessionId;
+    newItem.sessionId = sessionId;
     newItem.quantity = quantity;
     newItem.unitPrice = unitPrice;
 
@@ -166,11 +173,32 @@ export const getUserMenuCart = async (req: AuthenticatedRequest, res: Response):
 
     const items = await cartRepo.find({
       where: whereClause,
-      relations: ["menuItem", "variant"],
+      relations: ["menuItem", "variant", "menuItem.club"],
       order: { createdAt: "DESC" },
     });
 
-    res.status(200).json(items);
+    const enrichedItems = items.map(item => {
+      const { menuItem, variant } = item;
+      const basePrice = menuItem.hasVariants
+        ? variant?.price ?? 0
+        : menuItem.price!;
+
+      const currentPrice = computeDynamicPrice({
+        basePrice,
+        clubOpenDays: menuItem.club.openDays,
+        openHours: menuItem.club.openHours,
+      });
+
+      const discountApplied = Math.max(0, Math.round((basePrice - currentPrice) * 100) / 100);
+
+      return {
+        ...item,
+        currentPrice,
+        discountApplied
+      };
+    });
+
+    res.status(200).json(enrichedItems);
   } catch (err) {
     console.error("❌ Error fetching menu cart:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -201,6 +229,23 @@ export const removeMenuCartItem = async (req: AuthenticatedRequest, res: Respons
     res.status(204).send();
   } catch (err) {
     console.error("❌ Error removing menu cart item:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+//Used if user want to add tickets to existing menu cart
+export const clearMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const sessionId = !userId ? (req as any).sessionId : undefined;
+
+    const cartRepo = AppDataSource.getRepository(MenuCartItem);
+    const whereClause = userId ? { userId } : { sessionId };
+
+    await cartRepo.delete(whereClause);
+    res.status(204).send();
+  } catch (err) {
+    console.error("❌ Error clearing menu cart:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };

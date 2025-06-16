@@ -6,7 +6,8 @@ import {
   getAllMenuItems,
   getMenuItemById,
   getItemsForMyClub,
-  getMenuForClub
+  getMenuForClub,
+  getPublicMenuForClub
 } from "../controllers/menuItem.controller";
 import { authMiddleware, requireClubOwnerOrAdmin } from "../middlewares/authMiddleware";
 
@@ -14,9 +15,9 @@ const router = Router();
 
 // Public routes
 router.get("/all", getAllMenuItems);  //Returns all menu items across all clubs (only active items, with active variants).
-router.get("/:id", getMenuItemById);
 router.get("/club/:clubId", getMenuForClub);
-
+router.get("/club/:clubId/public", getPublicMenuForClub); // ✅ new route for grouped public menu
+router.get("/:id", getMenuItemById);
 
 // Clubowner routes
 router.get("/my/items", authMiddleware, requireClubOwnerOrAdmin, getItemsForMyClub);
