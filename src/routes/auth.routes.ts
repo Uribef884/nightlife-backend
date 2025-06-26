@@ -8,6 +8,7 @@ import {
   logout,
   forgotPassword,
   resetPassword,
+  getCurrentUser
 } from "../controllers/auth.controller";
 import { isAdmin } from "../middlewares/isAdmin";
 import { requireAuth } from "../middlewares/requireAuth";
@@ -28,6 +29,7 @@ router.post("/reset-password", resetPassword);
 // Authenticated user routes
 router.post("/logout", requireAuth, logout);
 router.delete("/me", requireAuth, deleteOwnUser);
+router.get("/me", requireAuth, getCurrentUser); // New route to test something in mock frontend
 
 // Admin-only routes
 router.delete("/:id", requireAuth, isAdmin, deleteUser);

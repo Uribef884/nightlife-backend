@@ -4,6 +4,7 @@ import { CartItem } from "../entities/TicketCartItem";
 import { AuthenticatedRequest } from "../types/express";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { Ticket } from "../entities/Ticket";
+import { MenuCartItem } from "../entities/MenuCartItem";
 import { toZonedTime, format } from "date-fns-tz";
 
 function ownsCartItem(item: CartItem, userId?: string, sessionId?: string): boolean {
@@ -13,17 +14,13 @@ function ownsCartItem(item: CartItem, userId?: string, sessionId?: string): bool
 
 export const addToCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    console.log("🧪 sessionID in controller:", (req as any).sessionID);
     const { ticketId, date, quantity } = req.body;
-    const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionId : undefined;
+    const userId: string | undefined = req.user?.id;
+    const sessionId: string | undefined = userId ? undefined : (req as any).sessionID;
 
-    if (!ticketId || !date || quantity == null) {
-      res.status(400).json({ error: "Missing required fields" });
-      return;
-    }
-
-    if (typeof quantity !== "number" || quantity <= 0) {
-      res.status(400).json({ error: "Quantity must be a positive number" });
+    if (!ticketId || !date || quantity == null || quantity <= 0) {
+      res.status(400).json({ error: "Missing or invalid fields" });
       return;
     }
 
@@ -38,19 +35,17 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
 
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const cartRepo = AppDataSource.getRepository(CartItem);
+    const ticket = await ticketRepo.findOne({ where: { id: ticketId }, relations: ["club", "event"] });
 
-    const ticket = await ticketRepo.findOne({
-      where: { id: ticketId },
-      relations: ["club", "event"]
-    });
-
-    if (!ticket) {
-      res.status(404).json({ error: "Ticket not found" });
+    if (!ticket || !ticket.isActive) {
+      res.status(404).json({ error: "Ticket not found or inactive" });
       return;
     }
 
-    if (!ticket.isActive) {
-      res.status(400).json({ error: "This ticket is currently inactive" });
+    const menuCartRepo = AppDataSource.getRepository(MenuCartItem);
+    const existingMenuItems = await menuCartRepo.find({ where: userId ? { userId } : { sessionId } });
+    if (existingMenuItems.length > 0) {
+      res.status(400).json({ error: "You must complete or clear your menu cart before adding tickets." });
       return;
     }
 
@@ -61,11 +56,9 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
         ? new Date(ticket.availableDate).toISOString().split("T")[0]
         : undefined;
 
-    if (isFree) {
-      if (!ticketDate || ticketDate !== date) {
-        res.status(400).json({ error: "This free ticket is only valid on its available date" });
-        return;
-      }
+    if (isFree && (!ticketDate || ticketDate !== date)) {
+      res.status(400).json({ error: "This free ticket is only valid on its available date" });
+      return;
     }
 
     if (!isFree && !ticket.availableDate && ticket.category === "general") {
@@ -90,10 +83,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
         return;
       }
 
-      const selectedDay = new Date(`${date}T12:00:00`).toLocaleString("en-US", {
-        weekday: "long",
-      });
-
+      const selectedDay = new Date(`${date}T12:00:00`).toLocaleString("en-US", { weekday: "long" });
       if (!(ticket.club.openDays || []).includes(selectedDay)) {
         res.status(400).json({ error: `This club is not open on ${selectedDay}` });
         return;
@@ -104,10 +94,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
     }
 
     const whereClause = userId ? { userId } : { sessionId };
-    const existingItems = await cartRepo.find({
-      where: whereClause,
-      relations: ["ticket", "ticket.club"],
-    });
+    const existingItems = await cartRepo.find({ where: whereClause, relations: ["ticket", "ticket.club"] });
 
     for (const item of existingItems) {
       if (item.ticket.club.id !== ticket.club.id) {
@@ -120,49 +107,33 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       }
     }
 
-    let totalTicketsInCart = 0;
-    for (const item of existingItems) {
-      if (item.ticket.id === ticketId && item.date === date) {
-        totalTicketsInCart += item.quantity;
-      }
-    }
+    const unitPrice = ticket.dynamicPricingEnabled
+      ? computeDynamicPrice({
+          basePrice: ticket.price,
+          clubOpenDays: ticket.club.openDays,
+          openHours: ticket.club.openHours,
+          availableDate: new Date(`${date}T00:00:00`),
+          useDateBasedLogic: !!ticket.eventId
+        })
+      : ticket.price;
 
-    if (totalTicketsInCart + quantity > ticket.maxPerPerson) {
-      res.status(400).json({
-        error: `You can only buy up to ${ticket.maxPerPerson} tickets of this type`,
-      });
+    if (unitPrice <= 0) {
+      res.status(400).json({ error: "Invalid ticket pricing configuration" });
       return;
     }
 
-    if (ticket.quantity != null) {
-      const totalCartQuantity = existingItems
-        .filter(item => item.ticket.id === ticketId && item.date === date)
-        .reduce((sum, item) => sum + item.quantity, 0);
-
-      if (totalCartQuantity + quantity > ticket.quantity) {
-        res.status(400).json({
-          error: `Only ${ticket.quantity - totalCartQuantity} tickets are available`,
-        });
-        return;
-      }
-    }
-
-    const unitPrice = computeDynamicPrice({
-      basePrice: ticket.price,
-      clubOpenDays: ticket.club.openDays,
-      openHours: ticket.club.openHours,
-      availableDate: new Date(`${date}T00:00:00`),
-      useDateBasedLogic: !!ticket.eventId
-    });
-
     const existing = await cartRepo.findOne({
-      where: userId
-        ? { userId, ticketId, date }
-        : { sessionId, ticketId, date },
+      where: userId ? { userId, ticketId, date } : { sessionId, ticketId, date }
     });
 
     if (existing) {
-      existing.quantity += quantity;
+      const newTotal = existing.quantity + quantity;
+      if (newTotal > ticket.maxPerPerson) {
+        res.status(400).json({ error: `You can only buy up to ${ticket.maxPerPerson} tickets of this type` });
+        return;
+      }
+
+      existing.quantity = newTotal;
       existing.unitPrice = unitPrice;
       await cartRepo.save(existing);
       res.status(200).json(existing);
@@ -181,7 +152,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
     await cartRepo.save(newItem);
     res.status(201).json(newItem);
   } catch (err) {
-    console.error("❌ Error adding to cart:", err);
+    console.error("❌ Error adding to ticket cart:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -190,7 +161,7 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
   try {
     const { id, quantity } = req.body;
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionId : undefined;
+    const sessionId = !userId ? (req as any).sessionID : undefined;
 
     if (!id || typeof quantity !== "number" || quantity <= 0) {
       res.status(400).json({ error: "Valid ID and quantity are required" });
@@ -220,17 +191,15 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    // 🔒 Prevent quantity updates beyond per-person max
     if (quantity > ticket.maxPerPerson) {
       res.status(400).json({ error: `You can only buy up to ${ticket.maxPerPerson} tickets` });
       return;
     }
 
-    // 🔒 Enforce total stock limits if ticket has a defined quantity (free or paid)
     if (ticket.quantity != null) {
       const allCartItems = await cartRepo.find({
         where: userId ? { userId } : { sessionId },
-        relations: ["ticket"], // ✅ Ensure tickets are loaded
+        relations: ["ticket"],
       });
 
       const otherCartQuantity = allCartItems
@@ -246,7 +215,22 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
       }
     }
 
+    const unitPrice = computeDynamicPrice({
+      basePrice: ticket.price,
+      clubOpenDays: ticket.club.openDays,
+      openHours: ticket.club.openHours,
+      availableDate: new Date(`${item.date}T00:00:00`),
+      useDateBasedLogic: !!ticket.eventId
+    });
+
+    if (unitPrice <= 0) {
+      res.status(400).json({ error: "Invalid ticket pricing configuration" });
+      return;
+    }
+
     item.quantity = quantity;
+    item.unitPrice = unitPrice;
+
     await cartRepo.save(item);
     res.status(200).json(item);
   } catch (err) {
@@ -329,11 +313,10 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
   }
 };
 
-//Used if user want to add menuitem to existing ticket cart
 export const clearCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionId : undefined;
+    const sessionId = !userId ? (req as any).sessionID : undefined;
 
     const cartRepo = AppDataSource.getRepository(CartItem);
     const whereClause = userId ? { userId } : { sessionId };
@@ -342,6 +325,23 @@ export const clearCart = async (req: AuthenticatedRequest, res: Response): Promi
     res.status(204).send();
   } catch (err) {
     console.error("❌ Error clearing ticket cart:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+//Used if user want to add menuitem to existing ticket cart
+export const clearMenuCartFromTicket = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const sessionId = !userId ? (req as any).sessionID : undefined;
+
+    const menuCartRepo = AppDataSource.getRepository("menu_cart_item");
+    const whereClause = userId ? { userId } : { sessionId };
+    await menuCartRepo.delete(whereClause);
+
+    res.status(204).send();
+  } catch (err) {
+    console.error("❌ Error clearing menu cart from ticket flow:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };

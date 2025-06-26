@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>NightLife Cart Test</title>
+</head>
+<body>
+  <h1>NightLife Cart Test</h1>
+
+  <div>
+    <input id="ticketId" placeholder="Ticket ID" />
+    <input id="ticketDate" type="date" />
+    <input id="quantity" type="number" min="1" value="1" />
+  </div>
+
+  <div style="margin-top: 10px;">
+    <button id="addBtn">Add to Cart</button>
+    <button id="viewBtn">View Cart</button>
+    <button id="updateBtn">Update Quantity</button>
+    <button id="removeBtn">Remove Item</button>
+  </div>
+
+  <pre id="output" style="margin-top: 20px; background: #f0f0f0; padding: 10px;"></pre>
+
+  <!-- ✅ load JS last to ensure DOM is ready -->
+  <script src="test-cart.js"></script>
+</body>
+</html>

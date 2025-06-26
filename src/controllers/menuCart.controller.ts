@@ -12,19 +12,19 @@ function ownsMenuCartItem(item: MenuCartItem, userId?: string, sessionId?: strin
   return item.sessionId === sessionId;
 }
 
-// New function
 export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    console.log("🧪 sessionID in controller:", (req as any).sessionID);
     const { menuItemId, variantId, quantity } = req.body;
-    const userId = req.user?.id ?? null;
-    const sessionId = !userId ? (req as any).sessionID : undefined;
+    const userId: string | undefined = req.user?.id;
+    const sessionId: string | undefined = userId ? undefined : (req as any).sessionID;
 
     if (!menuItemId || quantity == null || quantity <= 0) {
       res.status(400).json({ error: "Missing or invalid fields" });
       return;
     }
 
-    // 🛑 Enforce cart exclusivity
+    // 🛑 Enforce ticket cart exclusivity
     const ticketCartRepo = AppDataSource.getRepository(CartItem);
     const existingTicketItems = await ticketCartRepo.find({ where: userId ? { userId } : { sessionId } });
     if (existingTicketItems.length > 0) {
@@ -55,29 +55,51 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
       return;
     }
 
-    if (menuItem.maxPerPerson && quantity > menuItem.maxPerPerson) {
-      res.status(400).json({ error: `Max per person for this item is ${menuItem.maxPerPerson}` });
-      return;
+    const existingMenuItems = await cartRepo.find({ where: userId ? { userId } : { sessionId } });
+    if (existingMenuItems.length > 0) {
+      const existingClubId = existingMenuItems[0].clubId;
+      if (existingClubId !== menuItem.clubId) {
+        res.status(400).json({
+          error: "You can only add items from one club to your cart. Please clear your cart first."
+        });
+        return;
+      }
     }
 
     const basePrice = menuItem.hasVariants
       ? menuItem.variants.find(v => v.id === variantId)?.price ?? 0
       : menuItem.price!;
 
-    const unitPrice = computeDynamicPrice({
-      basePrice,
-      clubOpenDays: menuItem.club.openDays,
-      openHours: menuItem.club.openHours
-    });
+    const unitPrice = menuItem.dynamicPricingEnabled
+      ? computeDynamicPrice({
+          basePrice,
+          clubOpenDays: menuItem.club.openDays,
+          openHours: menuItem.club.openHours
+        })
+      : basePrice;
+
+    if (unitPrice <= 0) {
+      res.status(400).json({ error: "Invalid price configuration for this item or variant." });
+      return;
+    }
 
     const where = userId
       ? { menuItemId, variantId: variantId ?? undefined, userId }
       : { menuItemId, variantId: variantId ?? undefined, sessionId };
 
     const existing = await cartRepo.findOne({ where });
+    const currentQuantity = existing?.quantity ?? 0;
+    const newTotal = currentQuantity + quantity;
+
+    if (menuItem.maxPerPerson && newTotal > menuItem.maxPerPerson) {
+      res.status(400).json({
+        error: `You can only purchase up to ${menuItem.maxPerPerson} units of this item.`
+      });
+      return;
+    }
 
     if (existing) {
-      existing.quantity += quantity;
+      existing.quantity = newTotal;
       existing.unitPrice = unitPrice;
       await cartRepo.save(existing);
       res.json(existing);
@@ -87,25 +109,26 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
     const newItem = new MenuCartItem();
     newItem.menuItemId = menuItemId;
     newItem.variantId = variantId ?? undefined;
-    newItem.userId = userId ?? undefined;
+    newItem.userId = userId;
     newItem.sessionId = sessionId;
     newItem.quantity = quantity;
     newItem.unitPrice = unitPrice;
+    newItem.clubId = menuItem.clubId;
 
     await cartRepo.save(newItem);
     res.status(201).json(newItem);
   } catch (err) {
-    console.error("Error adding to menu cart:", err);
+    console.error("❌ Error adding to menu cart:", err);
     res.status(500).json({ error: "Server error adding item" });
   }
 };
 
-export const updateMenuCartItem = async(req: AuthenticatedRequest, res: Response): Promise<void>=> {
+export const updateMenuCartItem = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
     const { quantity } = req.body;
-    const userId = (req as any).user?.id ?? null;
-    const sessionId = (req as any).sessionID;
+    const userId = req.user?.id ?? null;
+    const sessionId = !userId ? (req as any).sessionID : undefined;
 
     if (!quantity || quantity <= 0) {
       res.status(400).json({ error: "Quantity must be greater than zero" });
@@ -126,11 +149,7 @@ export const updateMenuCartItem = async(req: AuthenticatedRequest, res: Response
       return;
     }
 
-    const menuItem = await itemRepo.findOne({
-      where: { id: cartItem.menuItemId },
-      relations: ["variants", "club"]
-    });
-
+    const menuItem = await itemRepo.findOne({ where: { id: cartItem.menuItemId } });
     if (!menuItem || !menuItem.isActive) {
       res.status(400).json({ error: "Item no longer available" });
       return;
@@ -143,21 +162,12 @@ export const updateMenuCartItem = async(req: AuthenticatedRequest, res: Response
       return;
     }
 
-    const basePrice = menuItem.hasVariants
-      ? menuItem.variants.find(v => v.id === cartItem.variantId)?.price ?? 0
-      : menuItem.price!;
-
     cartItem.quantity = quantity;
-    cartItem.unitPrice = computeDynamicPrice({
-      basePrice,
-      clubOpenDays: menuItem.club.openDays,
-      openHours: menuItem.club.openHours
-    });
-
     await cartRepo.save(cartItem);
+
     res.json(cartItem);
   } catch (err) {
-    console.error("Error updating cart item:", err);
+    console.error("❌ Error updating cart item:", err);
     res.status(500).json({ error: "Server error updating item" });
   }
 };
@@ -233,11 +243,11 @@ export const removeMenuCartItem = async (req: AuthenticatedRequest, res: Respons
   }
 };
 
-//Used if user want to add tickets to existing menu cart
+
 export const clearMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionId : undefined;
+    const sessionId = !userId ? (req as any).sessionID : undefined;
 
     const cartRepo = AppDataSource.getRepository(MenuCartItem);
     const whereClause = userId ? { userId } : { sessionId };
@@ -246,6 +256,23 @@ export const clearMenuCart = async (req: AuthenticatedRequest, res: Response): P
     res.status(204).send();
   } catch (err) {
     console.error("❌ Error clearing menu cart:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+//Used if user want to add tickets to existing menu cart
+export const clearTicketCartFromMenu = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const sessionId = !userId ? (req as any).sessionID : undefined;
+
+    const cartRepo = AppDataSource.getRepository(CartItem); // TicketCartItem
+    const whereClause = userId ? { userId } : { sessionId };
+
+    await cartRepo.delete(whereClause);
+    res.status(204).send();
+  } catch (err) {
+    console.error("❌ Error clearing ticket cart from menu flow:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };

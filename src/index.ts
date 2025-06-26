@@ -21,19 +21,49 @@ import menuCartRoutes from "./routes/menuCart.routes";
 import menuCheckoutRoutes from "./routes/menuCheckout.routes";
 import menuPurchaseRoutes from "./routes/menuPurchases.routes";
 
+import session from "express-session";
+
 dotenv.config();
 
 const app = express();
+app.set("trust proxy", true); // ✅ REQUIRED for ngrok and proper secure cookie handling
 const PORT = process.env.PORT || 4000;
-
 
 // Middleware
 app.use(express.json());
 app.use(cookieParser()); // ✅ make sure this comes before authMiddleware
  // ✅ global middleware
+
+app.use(session({
+  secret: process.env.SESSION_SECRET || "nightlife-secret",
+  resave: false,
+  saveUninitialized: true,
+  cookie: {
+    secure: process.env.NODE_ENV === "production", // ✅ secure only in production
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // ✅ cross-origin over HTTPS
+    maxAge: 1000 * 60 * 30 // 30 minutes
+  }
+}));
+
+// ✅ Ensure session gets initialized on first request
+app.use((req, res, next) => {
+  console.log("🔍 SessionID cookie:", req.cookies.sessionId);
+  console.log("🔒 Secure req?", req.secure, "Protocol:", req.headers["x-forwarded-proto"]);
+  if (!req.session.visited) {
+    req.session.visited = true;
+  }
+  next();
+});
+
+
 app.use(attachSessionId); // Must come before routes that need session
 app.use(cors());
 app.use(helmet());
+
+
+//Test cart front end
+app.use(express.static("public")); // serve static HTML like test-cart.html
+
 
 // Routes
 app.use("/auth", authRoutes);
@@ -52,6 +82,7 @@ app.use("/menu/variants", menuVariantRoutes);
 app.use("/menu/cart", menuCartRoutes);
 app.use("/menu/checkout", menuCheckoutRoutes);
 app.use("/menu/purchases", menuPurchaseRoutes);
+
 
 
 // DB Connection + Server Start

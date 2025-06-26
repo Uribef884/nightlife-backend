@@ -10,7 +10,7 @@ import { AuthenticatedRequest } from "../types/express";
 import { CartItem } from "../entities/TicketCartItem";
 import { authSchemaRegister } from "../schemas/auth.schema";
 import { forgotPasswordSchema, resetPasswordSchema } from "../schemas/forgot.schema";
-import { sendPasswordResetEmail } from "../services/emailService"; // ✅ to be created next
+import { sendPasswordResetEmail } from "../services/emailService"; 
 import { MenuCartItem } from "../entities/MenuCartItem";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
@@ -87,7 +87,7 @@ export async function login(req: Request, res: Response): Promise<void> {
   }
 
   // Clear anonymous cart
-  const sessionId = req.cookies?.sessionId;
+  const sessionId = (req as any).sessionID;
   if (sessionId) {
     await clearAnonymousCart(sessionId);
     res.clearCookie("sessionId");
@@ -291,3 +291,18 @@ export async function resetPassword(req: Request, res: Response): Promise<void> 
     res.status(400).json({ error: "Invalid or expired token" });
   }
 }
+
+export const getCurrentUser = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  const user = req.user;
+
+  if (!user) {
+    res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+
+  const { id, email, role, clubId } = user;
+  res.json({ id, email, role, clubId });
+};
