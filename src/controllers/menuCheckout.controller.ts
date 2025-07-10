@@ -6,8 +6,12 @@ import { MenuPurchase } from "../entities/MenuPurchase";
 import { MenuPurchaseTransaction } from "../entities/MenuPurchaseTransaction";
 import { calculateGatewayFees, calculatePlatformFee } from "../utils/menuFeeUtils";
 import { generateEncryptedQR } from "../utils/generateEncryptedQR";
+import { sendMenuEmail } from "../services/emailService";
+import { isDisposableEmail } from "../utils/disposableEmailValidator";
 import { User } from "../entities/User";
 import { mockValidateWompiTransaction } from "../services/mockWompiService";
+import { AuthenticatedRequest } from "../types/express";
+import QRCode from "qrcode";
 
 export const processSuccessfulMenuCheckout = async ({
   userId,
@@ -35,7 +39,7 @@ export const processSuccessfulMenuCheckout = async ({
 
   const cartItems = await cartRepo.find({
     where,
-    relations: ["menuItem", "variant"],
+    relations: ["menuItem", "variant", "menuItem.club"],
   });
 
   if (!cartItems.length) return res.status(400).json({ error: "Cart is empty" });
@@ -52,7 +56,13 @@ export const processSuccessfulMenuCheckout = async ({
   const menuPurchases: MenuPurchase[] = [];
 
   for (const item of cartItems) {
-    const price = item.variant?.price ?? item.menuItem.price!;
+    const rawPrice = item.variant?.price ?? item.menuItem.price!;
+    const price = Number(rawPrice);
+    if (isNaN(price)) {
+      console.error(`[❌] Invalid price for menuItemId: ${item.menuItemId}`);
+      continue; // skip this item to avoid corrupt totals
+    }
+
     const platformFee = calculatePlatformFee(price, 0.025);
     const { totalGatewayFee, iva } = calculateGatewayFees(price);
 
@@ -65,7 +75,7 @@ export const processSuccessfulMenuCheckout = async ({
     gatewayFeeTotal += totalGatewayFee * quantity;
     gatewayIVATotal += iva * quantity;
 
-    const menuPurchase = purchaseRepo.create({
+    const purchase = purchaseRepo.create({
       menuItemId: item.menuItemId,
       variantId: item.variantId ?? undefined,
       quantity,
@@ -74,36 +84,29 @@ export const processSuccessfulMenuCheckout = async ({
       clubReceives: price,
       platformReceives: platformFee,
       platformFeeApplied: 0.025,
-      user: user ?? undefined,
+      userId,
+      sessionId,
     });
 
-    menuPurchases.push(menuPurchase);
+    menuPurchases.push(purchase);
   }
 
-  const qrPayload = {
+  const payload = {
+    type: "menu" as const,
+    transactionId: transactionId ?? `mock-${Date.now()}`,
     email,
-    clubId,
-    menuPurchases: menuPurchases.map((p) => ({
-      itemId: p.menuItemId,
-      variantId: p.variantId,
-      qty: p.quantity,
-    })),
+    userId,
+    sessionId,
+    timestamp: new Date().toISOString(),
   };
 
-  const encryptedPayload = await generateEncryptedQR({
-  type: "menu",
-  transactionId: transactionId ?? `mock-${Date.now()}`,
-  email,
-  userId,
-  sessionId,
-  timestamp: new Date().toISOString()
-  });
+  const encryptedPayload = await generateEncryptedQR(payload);
+  const qrImageDataUrl = await QRCode.toDataURL(encryptedPayload);
 
   const transaction = transactionRepo.create({
-    email,
     clubId,
     sessionId: sessionId ?? undefined,
-    user: user ?? undefined,
+    userId: userId ?? undefined,
     totalPaid,
     clubReceives,
     platformReceives,
@@ -113,15 +116,28 @@ export const processSuccessfulMenuCheckout = async ({
     paymentProvider: "mock",
     paymentStatus: "PENDING",
     ...(transactionId ? { paymentProviderTransactionId: transactionId } : {}),
+    email,
   });
-
-  await transactionRepo.save(transaction);
 
   for (const purchase of menuPurchases) {
     purchase.transaction = transaction;
   }
 
+  await transactionRepo.save(transaction);
   await purchaseRepo.save(menuPurchases);
+
+  await sendMenuEmail({
+    to: email,
+    qrImageDataUrl,
+    clubName: cartItems[0].menuItem.club?.name ?? "Your Club",
+    items: cartItems.map((item) => ({
+      name: item.menuItem.name,
+      variant: item.variant?.name ?? null,
+      quantity: item.quantity,
+      unitPrice: item.variant?.price ?? item.menuItem.price!,
+    })),
+      total: totalPaid, 
+  });
 
   if (userId) {
     await cartRepo.delete({ userId });
@@ -130,17 +146,40 @@ export const processSuccessfulMenuCheckout = async ({
   }
 
   return res.json({
-    message: "Menu checkout initialized (pending payment)",
+    message: "Menu checkout completed",
     transactionId: transaction.id,
     totalPaid,
+    items: menuPurchases.map((p) => ({
+      itemId: p.menuItemId,
+      variantId: p.variantId,
+      pricePerUnit: p.pricePerUnit,
+    })),
   });
 };
 
+export const checkoutMenu = async (req: Request, res: Response): Promise<Response> => {
+  const typedReq = req as AuthenticatedRequest;
+  const userId = typedReq.user?.id ?? null;
+  const sessionId = !userId && typedReq.sessionId ? typedReq.sessionId : null;
+  const email: string | undefined = typedReq.user?.email ?? typedReq.body?.email;
+
+  if (!email) {
+    return res.status(400).json({ error: "Email is required for checkout" });
+  }
+
+  if (!req.user && isDisposableEmail(email)) {
+    return res.status(403).json({ error: "Disposable email domains are not allowed" });
+  }
+
+  return await processSuccessfulMenuCheckout({ userId, sessionId, email, req, res });
+};
+
 export const confirmMockMenuCheckout = async (req: Request, res: Response): Promise<Response> => {
-  const userId = req.user?.id ?? null;
-  const sessionId = req.cookies?.sessionId ?? null;
-  const email = req.body.email;
-  const transactionId = req.body.transactionId;
+  const typedReq = req as AuthenticatedRequest;
+  const userId = typedReq.user?.id ?? null;
+  const sessionId = !userId && typedReq.sessionId ? typedReq.sessionId : null;
+  const email = typedReq.body.email;
+  const transactionId = typedReq.body.transactionId;
 
   if (!email || !transactionId) {
     return res.status(400).json({ error: "Missing email or transaction ID" });

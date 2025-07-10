@@ -87,11 +87,16 @@ export async function login(req: Request, res: Response): Promise<void> {
   }
 
   // Clear anonymous cart
-  const sessionId = (req as any).sessionID;
+  const typedReq = req as AuthenticatedRequest;
+  const sessionId = !typedReq.user?.id && typedReq.sessionId ? typedReq.sessionId : null;
+
   if (sessionId) {
     await clearAnonymousCart(sessionId);
-    res.clearCookie("sessionId");
-    (req as any).sessionId = undefined;
+    res.clearCookie("sessionId", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    });
   }
 
   let clubId: string | undefined = undefined;
@@ -132,7 +137,8 @@ export async function login(req: Request, res: Response): Promise<void> {
 }
 
 export async function logout(req: Request, res: Response): Promise<void> {
-  const sessionId = req.cookies?.sessionId;
+  const typedReq = req as AuthenticatedRequest;
+  const sessionId = !typedReq.user?.id && typedReq.sessionId ? typedReq.sessionId : null;
   const userId = (req as AuthenticatedRequest).user?.id;
 
   const cartRepo = AppDataSource.getRepository(CartItem);

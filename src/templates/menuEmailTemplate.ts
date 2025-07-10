@@ -20,7 +20,7 @@ export function generateMenuEmailHTML({
         <td style="padding: 8px; border: 1px solid #ccc;">${item.name}</td>
         <td style="padding: 8px; border: 1px solid #ccc;">${item.variant || "-"}</td>
         <td style="padding: 8px; border: 1px solid #ccc; text-align: center;">${item.quantity}</td>
-        <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">$${item.unitPrice.toFixed(2)}</td>
+        <td style="padding: 8px; border: 1px solid #ccc; text-align: right;">$${Number(item.unitPrice).toFixed(2)}</td>
       </tr>
     `
   ).join("");

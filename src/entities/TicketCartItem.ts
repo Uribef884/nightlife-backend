@@ -14,11 +14,11 @@ export class CartItem {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
 
-  @Column({ nullable: true })
-  userId?: string;
+  @Column({ type: "varchar", nullable: true, default: null })
+  userId!: string | null;
 
-  @Column({ nullable: true })
-  sessionId?: string; // 👈 For anonymous users
+  @Column({ type: "varchar", nullable: true, default: null })
+  sessionId!: string | null;
 
   @Column()
   ticketId!: string;

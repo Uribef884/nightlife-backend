@@ -30,7 +30,7 @@ router.post("/initiate", optionalAuthMiddleware, async (req, res) => {
 });
 
 // ✅ Step 2 – Confirm mock transaction & trigger ticketing flow
-router.post("/confirm", async (req, res) => {
+router.post("/confirm", optionalAuthMiddleware ,async (req, res) => {
   try {
     await confirmMockCheckout(req, res);
   } catch (err) {

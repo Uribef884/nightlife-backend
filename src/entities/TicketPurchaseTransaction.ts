@@ -20,6 +20,9 @@ export class PurchaseTransaction {
   @JoinColumn({ name: "userId" })
   user?: User;
 
+  @Column({ nullable: true }) // ✅ Required for anonymous checkout to work properly
+  userId?: string;
+
   @Column()
   clubId!: string;
 

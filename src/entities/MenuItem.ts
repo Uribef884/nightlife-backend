@@ -17,7 +17,14 @@ export class MenuItem {
   @Column({ nullable: true })
   imageUrl?: string;
 
-  @Column({ type: 'decimal', nullable: true })
+  @Column({
+    type: "numeric",
+    nullable: true,
+    transformer: {
+      to: (value: number | null) => value,
+      from: (value: string | null) => (value !== null ? parseFloat(value) : null),
+    },
+  })
   price?: number; // optional if hasVariants is true
 
   @Column({ default: false })

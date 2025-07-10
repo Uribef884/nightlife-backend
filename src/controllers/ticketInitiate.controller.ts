@@ -6,11 +6,13 @@ import { isDisposableEmail } from "../utils/disposableEmailValidator";
 import { processSuccessfulCheckout } from "./ticketCheckout.controller";
 import { issueMockTransaction, mockValidateWompiTransaction } from "../services/mockWompiService";
 import { differenceInMinutes } from "date-fns"; // 🆕 For TTL logic
+import { AuthenticatedRequest } from "../types/express";
 
 export const initiateMockCheckout = async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id ?? null;
-  const sessionId = req.cookies?.sessionId ?? null;
-  const email = (req as any).user?.email ?? req.body?.email;
+  const typedReq = req as AuthenticatedRequest;
+  const userId = typedReq.user?.id ?? null;
+  const sessionId: string | null = !userId && typedReq.sessionId ? typedReq.sessionId : null;
+  const email = typedReq.user?.email ?? typedReq.body?.email;
 
   if (!email || typeof email !== "string") {
     return res.status(400).json({ error: "Email is required to complete checkout." });
@@ -76,7 +78,7 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
   }
 
   const reference = issueMockTransaction();
-  console.log(`[INITIATE] Issued mock reference ${reference}. Confirming checkout...`);
+  console.log(`[INITIATE] Mock reference ${reference} | User: ${userId ?? sessionId} | Email: ${email}`);
 
   const mockResult = await mockValidateWompiTransaction(reference);
   if (!mockResult.approved) {

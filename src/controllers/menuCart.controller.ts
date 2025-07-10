@@ -14,10 +14,9 @@ function ownsMenuCartItem(item: MenuCartItem, userId?: string, sessionId?: strin
 
 export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    console.log("🧪 sessionID in controller:", (req as any).sessionID);
     const { menuItemId, variantId, quantity } = req.body;
     const userId: string | undefined = req.user?.id;
-    const sessionId: string | undefined = userId ? undefined : (req as any).sessionID;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
     if (!menuItemId || quantity == null || quantity <= 0) {
       res.status(400).json({ error: "Missing or invalid fields" });
@@ -109,8 +108,8 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
     const newItem = new MenuCartItem();
     newItem.menuItemId = menuItemId;
     newItem.variantId = variantId ?? undefined;
-    newItem.userId = userId;
-    newItem.sessionId = sessionId;
+    newItem.userId = userId ?? null;
+    newItem.sessionId = sessionId ?? null;
     newItem.quantity = quantity;
     newItem.unitPrice = unitPrice;
     newItem.clubId = menuItem.clubId;
@@ -128,7 +127,7 @@ export const updateMenuCartItem = async (req: AuthenticatedRequest, res: Respons
     const { id } = req.params;
     const { quantity } = req.body;
     const userId = req.user?.id ?? null;
-    const sessionId = !userId ? (req as any).sessionID : undefined;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
     if (!quantity || quantity <= 0) {
       res.status(400).json({ error: "Quantity must be greater than zero" });
@@ -176,8 +175,7 @@ export const updateMenuCartItem = async (req: AuthenticatedRequest, res: Respons
 export const getUserMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionID : undefined;
-
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
     const cartRepo = AppDataSource.getRepository(MenuCartItem);
     const whereClause = userId ? { userId } : { sessionId };
 
@@ -220,7 +218,7 @@ export const removeMenuCartItem = async (req: AuthenticatedRequest, res: Respons
   try {
     const { id } = req.params;
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionID : undefined;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
     const cartRepo = AppDataSource.getRepository(MenuCartItem);
     const item = await cartRepo.findOneBy({ id });
@@ -247,7 +245,7 @@ export const removeMenuCartItem = async (req: AuthenticatedRequest, res: Respons
 export const clearMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionID : undefined;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
     const cartRepo = AppDataSource.getRepository(MenuCartItem);
     const whereClause = userId ? { userId } : { sessionId };
@@ -264,7 +262,7 @@ export const clearMenuCart = async (req: AuthenticatedRequest, res: Response): P
 export const clearTicketCartFromMenu = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionID : undefined;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
     const cartRepo = AppDataSource.getRepository(CartItem); // TicketCartItem
     const whereClause = userId ? { userId } : { sessionId };

@@ -7,11 +7,11 @@ export class MenuCartItem {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ nullable: true })
-  userId?: string;
+  @Column({ type: "varchar", nullable: true, default: null })
+  userId!: string | null;
 
-  @Column({ nullable: true })
-  sessionId?: string;
+  @Column({ type: "varchar", nullable: true, default: null })
+  sessionId!: string | null;
 
   @Column()
   menuItemId!: string;

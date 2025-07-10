@@ -24,9 +24,11 @@ export class TicketPurchase {
   @Column()
   ticketId!: string;
 
-  @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
-  @JoinColumn({ name: "userId" })
-  user?: User;
+  @Column({ type: "varchar", nullable: true, default: null })
+  userId!: string | null;
+
+  @Column({ type: "varchar", nullable: true, default: null })
+  sessionId!: string | null;
 
   @ManyToOne(() => Club)
   @JoinColumn({ name: "clubId" })

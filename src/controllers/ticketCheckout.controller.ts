@@ -11,6 +11,8 @@ import { sendTicketEmail } from "../services/emailService";
 import { differenceInMinutes } from "date-fns";
 import { mockValidateWompiTransaction } from "../services/mockWompiService";
 import { User } from "../entities/User";
+import { AuthenticatedRequest } from "../types/express"; 
+import QRCode from "qrcode";
 
 export const processSuccessfulCheckout = async ({
   userId,
@@ -131,11 +133,13 @@ export const processSuccessfulCheckout = async ({
         email,
       };
 
-      const qrDataUrl = await generateEncryptedQR(payload);
+      const encryptedPayload = await generateEncryptedQR(payload);             // ⬅️ payload only
+      const qrDataUrl = await QRCode.toDataURL(encryptedPayload);       // ⬅️ image for email
 
       const purchase = purchaseRepo.create({
         ticketId: ticket.id,
-        user: user ?? undefined,
+        userId,
+        sessionId,
         clubId,
         email,
         date,
@@ -144,7 +148,7 @@ export const processSuccessfulCheckout = async ({
         platformReceives: platformFee,
         gatewayFee: itemGatewayFee,
         gatewayIVA: iva,
-        qrCodeEncrypted: Buffer.from(JSON.stringify(payload)).toString("base64"),
+        qrCodeEncrypted: encryptedPayload,
         platformFeeApplied: platformFeePercentage,
       });
 
@@ -219,9 +223,10 @@ export const processSuccessfulCheckout = async ({
 };
 
 export const checkout = async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id ?? null;
-  const sessionId = req.cookies?.sessionId ?? null;
-  const email: string | undefined = (req as any).user?.email ?? req.body?.email;
+  const typedReq = req as AuthenticatedRequest;
+  const userId = typedReq.user?.id ?? null;
+  const sessionId = !userId && typedReq.sessionId ? typedReq.sessionId : null;
+  const email: string | undefined = typedReq.user?.email ?? typedReq.body?.email;
 
   if (!email) {
     return res.status(400).json({ error: "Email is required for checkout" });
@@ -235,9 +240,10 @@ export const checkout = async (req: Request, res: Response) => {
 };
 
 export const confirmMockCheckout = async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id ?? null;
-  const sessionId = req.cookies?.sessionId ?? null;
-  const email: string | undefined = (req as any).user?.email ?? req.body?.email;
+  const typedReq = req as AuthenticatedRequest;
+  const userId = typedReq.user?.id ?? null;
+  const sessionId = !userId && typedReq.sessionId ? typedReq.sessionId : null;
+  const email: string | undefined = typedReq.user?.email ?? typedReq.body?.email;
   const transactionId = req.body.transactionId;
 
   if (!email || !transactionId) {

@@ -12,6 +12,9 @@ export class MenuPurchaseTransaction {
   user?: User;
 
   @Column({ nullable: true })
+  userId?: string;
+
+  @Column({ nullable: true })
   sessionId?: string;
 
   @Column()
@@ -35,7 +38,7 @@ export class MenuPurchaseTransaction {
   @Column({ default: "mock" })
   paymentProvider!: "mock" | "wompi";
 
-@Column({ default: "PENDING" })
+  @Column({ default: "PENDING" })
   paymentStatus!: "APPROVED" | "DECLINED" | "PENDING";
 
   @Column('decimal')
@@ -65,6 +68,9 @@ export class MenuPurchaseTransaction {
   @Column({ type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
   createdAt!: Date;
 
-  @OneToMany(() => MenuPurchase, (purchase) => purchase.transaction)
+  @OneToMany(() => MenuPurchase, (purchase) => purchase.transaction, {
+    cascade: true,
+    onDelete: "CASCADE", // ✅ THIS IS CRUCIAL
+  })
   purchases!: MenuPurchase[];
 }

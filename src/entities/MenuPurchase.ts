@@ -9,9 +9,11 @@ export class MenuPurchase {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
-  @JoinColumn({ name: "userId" })
-  user?: User;
+  @Column({ type: "varchar", nullable: true, default: null })
+  userId!: string | null;
+
+  @Column({ type: "varchar", nullable: true, default: null })
+  sessionId!: string | null;
 
   @Column()
   menuItemId!: string;
@@ -47,5 +49,6 @@ export class MenuPurchase {
   purchaseTransactionId!: string;
 
   @ManyToOne(() => MenuPurchaseTransaction, (tx) => tx.purchases)
+  @JoinColumn({ name: "purchaseTransactionId" }) // ✅ FIXED
   transaction!: MenuPurchaseTransaction;
 }

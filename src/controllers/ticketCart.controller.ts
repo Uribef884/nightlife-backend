@@ -14,10 +14,9 @@ function ownsCartItem(item: CartItem, userId?: string, sessionId?: string): bool
 
 export const addToCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    console.log("🧪 sessionID in controller:", (req as any).sessionID);
     const { ticketId, date, quantity } = req.body;
     const userId: string | undefined = req.user?.id;
-    const sessionId: string | undefined = userId ? undefined : (req as any).sessionID;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
     if (!ticketId || !date || quantity == null || quantity <= 0) {
       res.status(400).json({ error: "Missing or invalid fields" });
@@ -117,7 +116,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
         })
       : ticket.price;
 
-    if (unitPrice <= 0) {
+    if (unitPrice < 0) {
       res.status(400).json({ error: "Invalid ticket pricing configuration" });
       return;
     }
@@ -161,7 +160,7 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
   try {
     const { id, quantity } = req.body;
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionID : undefined;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
     if (!id || typeof quantity !== "number" || quantity <= 0) {
       res.status(400).json({ error: "Valid ID and quantity are required" });
@@ -223,7 +222,7 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
       useDateBasedLogic: !!ticket.eventId
     });
 
-    if (unitPrice <= 0) {
+    if (unitPrice < 0) {
       res.status(400).json({ error: "Invalid ticket pricing configuration" });
       return;
     }
@@ -243,7 +242,7 @@ export const removeCartItem = async (req: AuthenticatedRequest, res: Response): 
   try {
     const { id } = req.params;
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionId : undefined;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
     const cartRepo = AppDataSource.getRepository(CartItem);
     const item = await cartRepo.findOneBy({ id });
@@ -269,7 +268,7 @@ export const removeCartItem = async (req: AuthenticatedRequest, res: Response): 
 export const getUserCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionId : undefined;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
     const cartRepo = AppDataSource.getRepository(CartItem);
     const whereClause = userId ? { userId } : { sessionId };
@@ -316,7 +315,7 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
 export const clearCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionID : undefined;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
     const cartRepo = AppDataSource.getRepository(CartItem);
     const whereClause = userId ? { userId } : { sessionId };
@@ -333,7 +332,7 @@ export const clearCart = async (req: AuthenticatedRequest, res: Response): Promi
 export const clearMenuCartFromTicket = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
-    const sessionId = !userId ? (req as any).sessionID : undefined;
+    const sessionId = !userId ? req.sessionId : undefined;
 
     const menuCartRepo = AppDataSource.getRepository("menu_cart_item");
     const whereClause = userId ? { userId } : { sessionId };

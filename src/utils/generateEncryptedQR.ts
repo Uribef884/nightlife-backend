@@ -21,6 +21,6 @@ export async function generateEncryptedQR(data: QRPayload): Promise<string> {
   const cipher = createCipheriv(algorithm, key, iv);
   const encrypted = Buffer.concat([cipher.update(json), cipher.final()]);
   const payload = Buffer.concat([iv, encrypted]).toString("base64");
-  return payload;
+  return Buffer.concat([iv, encrypted]).toString("base64");
 }
 

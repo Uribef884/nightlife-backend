@@ -1,11 +1,12 @@
 import { Request, Response, NextFunction } from "express";
 import { v4 as uuidv4 } from "uuid";
 import jwt from "jsonwebtoken";
-import { JwtPayload } from "../types/jwt"; // your shared type
+import { JwtPayload } from "../types/jwt";
+import { AuthenticatedRequest } from "../types/express"; // ✅ use this to type req properly
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 
-export const attachSessionId = (req: Request, res: Response, next: NextFunction) => {
+export const attachSessionId = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const token = req.cookies?.token;
 
   if (token) {
@@ -17,7 +18,8 @@ export const attachSessionId = (req: Request, res: Response, next: NextFunction)
         email: decoded.email,
         clubId: decoded.clubId ?? undefined,
       };
-      return next(); // ✅ Do not assign sessionId if user is logged in
+      req.sessionId = null; // ✅ explicitly nullify sessionId if user is logged in
+      return next();
     } catch (err) {
       console.warn("⚠️ Invalid token in attachSessionId");
     }
@@ -30,12 +32,12 @@ export const attachSessionId = (req: Request, res: Response, next: NextFunction)
     sessionId = uuidv4();
     res.cookie(cookieName, sessionId, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: req.secure || req.headers["x-forwarded-proto"] === "https", // ✅ support ngrok
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       sameSite: "lax",
     });
   }
 
-  (req as any).sessionId = sessionId;
+  req.sessionId = sessionId; // ✅ always defined, even if user is logged in it's null
   next();
 };
