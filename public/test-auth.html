@@ -2,21 +2,293 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>NightLife Auth Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NightLife Authentication</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 15px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+    }
+
+    .content {
+      padding: 30px;
+    }
+
+    .section {
+      margin-bottom: 30px;
+      padding: 20px;
+      border: 1px solid #e1e5e9;
+      border-radius: 10px;
+      background: #f8f9fa;
+    }
+
+    .section h2 {
+      color: #333;
+      margin-bottom: 15px;
+      font-size: 1.3rem;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+      color: #555;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.3s;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+
+    .btn-secondary:hover {
+      background: #5a6268;
+      transform: translateY(-2px);
+    }
+
+    .btn-success {
+      background: #28a745;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #218838;
+      transform: translateY(-2px);
+    }
+
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #c82333;
+      transform: translateY(-2px);
+    }
+
+    .output {
+      background: #f8f9fa;
+      border: 1px solid #e1e5e9;
+      border-radius: 8px;
+      padding: 20px;
+      margin-top: 20px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .status {
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .status.info {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+
+    .status.warning {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeaa7;
+    }
+
+    .user-info {
+      background: #e3f2fd;
+      border: 1px solid #bbdefb;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .user-info h3 {
+      margin-bottom: 10px;
+      color: #1976d2;
+    }
+
+    .user-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+
+    .user-detail {
+      background: white;
+      padding: 8px 12px;
+      border-radius: 5px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .user-detail strong {
+      color: #333;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .auth-section {
+      background: #f3e5f5;
+      border: 1px solid #e1bee7;
+    }
+
+    .actions-section {
+      background: #e8f5e8;
+      border: 1px solid #c8e6c9;
+    }
+  </style>
 </head>
 <body>
-  <h1>NightLife Auth Test</h1>
+  <div class="container">
+    <div class="header">
+      <h1>🔐 NightLife Auth</h1>
+      <p>Login, Logout & Cart Management</p>
+    </div>
 
-  <div>
-    <h3>Login</h3>
-    <input id="email" placeholder="Email" />
-    <input id="password" placeholder="Password" type="password" />
-    <button id="loginBtn">Login</button>
-    <button id="logoutBtn">Logout</button>
+    <div class="content">
+      <!-- User Status -->
+      <div id="userStatus" class="section">
+        <h2>👤 User Status</h2>
+        <div id="statusMessage" class="status info">
+          ℹ️ Checking authentication status...
+        </div>
+        <div id="userInfo" class="user-info hidden">
+          <h3>✅ Logged In</h3>
+          <div class="user-details">
+            <div class="user-detail">
+              <strong>Email:</strong> <span id="userEmail">-</span>
+            </div>
+            <div class="user-detail">
+              <strong>Role:</strong> <span id="userRole">-</span>
+            </div>
+            <div class="user-detail">
+              <strong>ID:</strong> <span id="userId">-</span>
+            </div>
+            <div class="user-detail">
+              <strong>Club ID:</strong> <span id="userClubId">-</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Authentication Section -->
+      <div class="section auth-section">
+        <h2>🔑 Authentication</h2>
+        <div class="form-group">
+          <label for="email">Email Address:</label>
+          <input id="email" type="email" placeholder="Enter your email" />
+        </div>
+        <div class="form-group">
+          <label for="password">Password:</label>
+          <input id="password" type="password" placeholder="Enter your password" />
+        </div>
+        <button id="loginBtn" class="btn btn-primary">🔐 Login</button>
+        <button id="logoutBtn" class="btn btn-danger">🚪 Logout</button>
+      </div>
+
+      <!-- Actions Section -->
+      <div class="section actions-section">
+        <h2>🛒 Actions</h2>
+        <button id="checkAuthBtn" class="btn btn-secondary">🔍 Check Auth Status</button>
+        <button id="goToCartBtn" class="btn btn-success">🛒 Go to Cart</button>
+      </div>
+
+      <!-- Response Output -->
+      <div class="section">
+        <h2>📊 Response</h2>
+        <pre id="output" class="output">Ready to authenticate...</pre>
+      </div>
+    </div>
   </div>
-
-
-  <pre id="output" style="margin-top: 20px; background: #f0f0f0; padding: 10px;"></pre>
 
   <script src="test-auth.js"></script>
 </body>

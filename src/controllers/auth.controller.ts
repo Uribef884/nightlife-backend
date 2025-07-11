@@ -88,7 +88,8 @@ export async function login(req: Request, res: Response): Promise<void> {
 
   // Clear anonymous cart
   const typedReq = req as AuthenticatedRequest;
-  const sessionId = !typedReq.user?.id && typedReq.sessionId ? typedReq.sessionId : null;
+  // Get sessionId directly from cookies, not from middleware-processed req.sessionId
+  const sessionId = req.cookies?.sessionId;
 
   if (sessionId) {
     await clearAnonymousCart(sessionId);
