@@ -11,10 +11,6 @@ import { authMiddleware, requireAdminAuth, requireClubOwnerOrAdmin } from "../mi
 
 const router = Router();
 
-// 👤 Normal users (must be logged in)
-router.get("/my", authMiddleware, getUserMenuPurchases);
-router.get("/my/:id", authMiddleware, getUserMenuPurchaseById);
-
 // 🏢 Club owners (view purchases of their club)
 router.get("/club", authMiddleware, requireClubOwnerOrAdmin, getClubMenuPurchases);
 router.get("/club/:id", authMiddleware, requireClubOwnerOrAdmin, getClubMenuPurchaseById);
@@ -22,5 +18,9 @@ router.get("/club/:id", authMiddleware, requireClubOwnerOrAdmin, getClubMenuPurc
 // 🛡 Admins only
 router.get("/admin", authMiddleware, requireAdminAuth, getAllMenuPurchasesAdmin);
 router.get("/admin/:id", authMiddleware, requireAdminAuth, getMenuPurchaseByIdAdmin);
+
+// 👤 Normal users (must be logged in)
+router.get("/", authMiddleware, getUserMenuPurchases);
+router.get("/:id", authMiddleware, getUserMenuPurchaseById);
 
 export default router;
