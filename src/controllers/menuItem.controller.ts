@@ -319,29 +319,39 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
     });
 
     // Filter inactive variants and group by category
-    const grouped: Record<string, any[]> = {};
+    const grouped: Record<string, any> = {};
 
     items.forEach(item => {
       const variants = item.variants?.filter(v => v.isActive) ?? [];
 
       const publicItem = {
+        id: item.id,
         name: item.name,
         description: item.description,
         imageUrl: item.imageUrl,
         price: item.hasVariants ? null : item.price,
         dynamicPricingEnabled: item.dynamicPricingEnabled,
-        variants: item.hasVariants ? variants.map(v => ({ name: v.name, price: v.price })) : [],
+        variants: item.hasVariants
+          ? variants.map(v => ({
+              id: v.id,
+              name: v.name,
+              price: v.price
+            }))
+          : [],
       };
 
-      const catName = item.category?.name || "Uncategorized";
-      if (!grouped[catName]) grouped[catName] = [];
-      grouped[catName].push(publicItem);
+      const catKey = item.category?.id || "uncategorized";
+      if (!grouped[catKey]) {
+        grouped[catKey] = {
+          id: item.category?.id || null,
+          name: item.category?.name || "Uncategorized",
+          items: []
+        };
+      }
+      grouped[catKey].items.push(publicItem);
     });
 
-    const result = Object.entries(grouped).map(([category, items]) => ({
-      category,
-      items,
-    }));
+    const result = Object.values(grouped);
 
     res.json(result);
   } catch (err) {

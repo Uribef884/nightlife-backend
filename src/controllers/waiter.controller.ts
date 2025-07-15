@@ -7,7 +7,7 @@ import bcrypt from "bcrypt";
 import { authSchemaRegister } from "../schemas/auth.schema";
 import { isDisposableEmail } from "../utils/disposableEmailValidator";
 
-export const createBouncer = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const createWaiter = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     // Normalize email
     const email = req.body.email?.toLowerCase().trim();
@@ -48,7 +48,7 @@ export const createBouncer = async (req: AuthenticatedRequest, res: Response): P
     if (requester.role === "admin") {
       clubId = req.body.clubId;
       if (!clubId) {
-        res.status(400).json({ error: "Missing clubId for bouncer" });
+        res.status(400).json({ error: "Missing clubId for waiter" });
         return;
       }
     } else {
@@ -61,22 +61,22 @@ export const createBouncer = async (req: AuthenticatedRequest, res: Response): P
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newBouncer = userRepo.create({
+    const newWaiter = userRepo.create({
       email,
       password: hashedPassword,
-      role: "bouncer",
+      role: "waiter",
       clubId,
     });
 
-    await userRepo.save(newBouncer);
-    res.status(201).json({ message: "Bouncer created", bouncer: newBouncer });
+    await userRepo.save(newWaiter);
+    res.status(201).json({ message: "Waiter created", waiter: newWaiter });
   } catch (error) {
-    console.error("❌ Error creating bouncer:", error);
+    console.error("❌ Error creating waiter:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };
 
-export const getBouncers = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const getWaiters = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const userRepo = AppDataSource.getRepository(User);
   const requester = req.user;
 
@@ -102,34 +102,34 @@ export const getBouncers = async (req: AuthenticatedRequest, res: Response): Pro
     clubId = club.id;
   }
 
-  const bouncers = await userRepo.find({
-    where: { role: "bouncer", clubId },
+  const waiters = await userRepo.find({
+    where: { role: "waiter", clubId },
     select: ["id", "email", "createdAt"],
   });
 
-  res.json(bouncers);
+  res.json(waiters);
 };
 
-export const deleteBouncer = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const deleteWaiter = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const { id } = req.params;
   const userRepo = AppDataSource.getRepository(User);
   const requester = req.user;
 
-  const bouncer = await userRepo.findOneBy({ id, role: "bouncer" });
-  if (!bouncer) {
-    res.status(404).json({ error: "Bouncer not found" });
+  const waiter = await userRepo.findOneBy({ id, role: "waiter" });
+  if (!waiter) {
+    res.status(404).json({ error: "Waiter not found" });
     return;
   }
 
   const isAdmin = requester?.role === "admin";
   const ownerClub = await AppDataSource.getRepository(Club).findOneBy({ ownerId: requester!.id });
-  const isOwner = requester?.role === "clubowner" && bouncer.clubId === ownerClub?.id;
+  const isOwner = requester?.role === "clubowner" && waiter.clubId === ownerClub?.id;
 
   if (!isAdmin && !isOwner) {
-    res.status(403).json({ error: "You are not authorized to delete this bouncer" });
+    res.status(403).json({ error: "You are not authorized to delete this waiter" });
     return;
   }
 
-  await userRepo.remove(bouncer);
-  res.status(200).json({ message: "Bouncer deleted successfully" });
-};
+  await userRepo.remove(waiter);
+  res.status(200).json({ message: "Waiter deleted successfully" });
+}; 

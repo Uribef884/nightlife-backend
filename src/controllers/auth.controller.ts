@@ -19,7 +19,10 @@ const RESET_EXPIRY = "15m";
 
 export async function register(req: Request, res: Response): Promise<void> {
   try {
-    const result = authSchemaRegister.safeParse(req.body);
+    const email = req.body.email?.toLowerCase().trim();
+    const password = req.body.password;
+
+    const result = authSchemaRegister.safeParse({ email, password });
 
     if (!result.success) {
       res.status(400).json({
@@ -28,8 +31,6 @@ export async function register(req: Request, res: Response): Promise<void> {
       });
       return;
     }
-
-    const { email, password } = result.data;
 
     if (isDisposableEmail(email)) {
       res.status(403).json({ error: "Email domain not allowed" });
@@ -61,7 +62,8 @@ export async function register(req: Request, res: Response): Promise<void> {
 }
 
 export async function login(req: Request, res: Response): Promise<void> {
-  const { email, password } = req.body;
+  const email = req.body.email?.toLowerCase().trim();
+  const password = req.body.password;
 
   if (!email || !password) {
     res.status(401).json({ error: "Invalid credentials" });
@@ -78,10 +80,7 @@ export async function login(req: Request, res: Response): Promise<void> {
 
   const isMatch = await bcrypt.compare(password, user.password);
 
-  // ✅ Optional: check password strength here too
-  const strongEnough = /[A-Z]/.test(password) && /[0-9]/.test(password);
-
-  if (!isMatch || !strongEnough) {
+  if (!isMatch) {
     res.status(401).json({ error: "Invalid credentials" });
     return;
   }

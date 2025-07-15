@@ -9,7 +9,7 @@ import {
 } from "typeorm";
 import { Club } from "./Club";
 
-export type UserRole = "user" | "clubowner" | "bouncer" | "admin";
+export type UserRole = "user" | "clubowner" | "waiter" | "bouncer" | "admin";
 
 @Entity()
 export class User {

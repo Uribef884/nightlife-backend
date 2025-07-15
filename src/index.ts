@@ -20,6 +20,7 @@ import menuVariantRoutes from "./routes/menuVariant.routes";
 import menuCartRoutes from "./routes/menuCart.routes";
 import menuCheckoutRoutes from "./routes/menuCheckout.routes";
 import menuPurchaseRoutes from "./routes/menuPurchases.routes";
+import waiterRoutes from "./routes/waiter.routes";
 
 dotenv.config();
 
@@ -45,6 +46,7 @@ app.use("/auth", authRoutes);
 app.use("/clubs", clubRoutes);
 app.use("/tickets", ticketRoutes); // public GET access
 app.use("/bouncers", bouncerRoutes);
+app.use("/waiters", waiterRoutes);
 app.use("/cart", cartRoutes);
 app.use("/checkout", checkoutRoutes);
 app.use("/purchases", purchaseRoutes);

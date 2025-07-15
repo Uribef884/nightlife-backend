@@ -13,12 +13,8 @@ import {
   getPurchaseByIdAdmin,
   validateTicketQR
 } from "../controllers/ticketPurchases.controller";
-import { requireValidatorAccess } from "../middlewares/requireValidatorAccess";
 
 const router = Router();
-
-// ✅ QR Validation — must go before `/:id`
-router.patch("/:id/validate", authMiddleware, requireValidatorAccess, validateTicketQR);
 
 // 🏢 Club owners
 router.get("/club", authMiddleware, requireClubOwnerOrAdmin, getClubPurchases);
