@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Validation Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 3px;
+            white-space: pre-wrap;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>QR Validation Test</h1>
+    
+    <div class="section">
+        <h2>Menu QR Validation</h2>
+        <div class="form-group">
+            <label for="menuQR">Menu QR Code:</label>
+            <textarea id="menuQR" rows="3" placeholder="Enter encrypted QR code"></textarea>
+        </div>
+        <button onclick="previewMenuQR()">Preview Menu QR</button>
+        <button onclick="confirmMenuQR()">Confirm Menu QR</button>
+        <div id="menuResult" class="result"></div>
+    </div>
+
+    <div class="section">
+        <h2>Ticket QR Validation</h2>
+        <div class="form-group">
+            <label for="ticketQR">Ticket QR Code:</label>
+            <textarea id="ticketQR" rows="3" placeholder="Enter encrypted QR code"></textarea>
+        </div>
+        <button onclick="previewTicketQR()">Preview Ticket QR</button>
+        <button onclick="confirmTicketQR()">Confirm Ticket QR</button>
+        <div id="ticketResult" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:4000';
+
+        async function makeRequest(url, method, body) {
+            try {
+                const response = await fetch(`${API_BASE}${url}`, {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: body ? JSON.stringify(body) : undefined,
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                return { success: response.ok, data, status: response.status };
+            } catch (error) {
+                return { success: false, data: { error: error.message }, status: 500 };
+            }
+        }
+
+        function displayResult(elementId, result) {
+            const element = document.getElementById(elementId);
+            element.className = `result ${result.success ? 'success' : 'error'}`;
+            element.textContent = JSON.stringify(result.data, null, 2);
+        }
+
+        async function previewMenuQR() {
+            const qrCode = document.getElementById('menuQR').value;
+            if (!qrCode) {
+                alert('Please enter a QR code');
+                return;
+            }
+
+            const result = await makeRequest('/validate/menu', 'POST', { qrCode });
+            displayResult('menuResult', result);
+        }
+
+        async function confirmMenuQR() {
+            const qrCode = document.getElementById('menuQR').value;
+            if (!qrCode) {
+                alert('Please enter a QR code');
+                return;
+            }
+
+            const result = await makeRequest('/validate/menu/confirm', 'POST', { qrCode });
+            displayResult('menuResult', result);
+        }
+
+        async function previewTicketQR() {
+            const qrCode = document.getElementById('ticketQR').value;
+            if (!qrCode) {
+                alert('Please enter a QR code');
+                return;
+            }
+
+            const result = await makeRequest('/validate/ticket', 'POST', { qrCode });
+            displayResult('ticketResult', result);
+        }
+
+        async function confirmTicketQR() {
+            const qrCode = document.getElementById('ticketQR').value;
+            if (!qrCode) {
+                alert('Please enter a QR code');
+                return;
+            }
+
+            const result = await makeRequest('/validate/ticket/confirm', 'POST', { qrCode });
+            displayResult('ticketResult', result);
+        }
+    </script>
+</body>
+</html> 

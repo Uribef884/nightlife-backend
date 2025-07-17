@@ -125,16 +125,14 @@ export const processSuccessfulCheckout = async ({
       totalGatewayFee += itemGatewayFee;
       totalGatewayIVA += iva;
 
-      const type = "ticket" as const;
       const payload = {
-        type: type, // ✅ REQUIRED field
-        ticketId: ticket.id,
-        date: rawDateStr,
-        email,
+        id: ticket.id,
+        clubId,
+        type: "ticket" as const
       };
 
-      const encryptedPayload = await generateEncryptedQR(payload);             // ⬅️ payload only
-      const qrDataUrl = await QRCode.toDataURL(encryptedPayload);       // ⬅️ image for email
+      const encryptedPayload = await generateEncryptedQR(payload);
+      const qrDataUrl = await QRCode.toDataURL(encryptedPayload);
 
       const purchase = purchaseRepo.create({
         ticketId: ticket.id,

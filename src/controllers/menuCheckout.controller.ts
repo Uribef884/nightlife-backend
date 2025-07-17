@@ -92,12 +92,9 @@ export const processSuccessfulMenuCheckout = async ({
   }
 
   const payload = {
-    type: "menu" as const,
-    transactionId: transactionId ?? `mock-${Date.now()}`,
-    email,
-    userId,
-    sessionId,
-    timestamp: new Date().toISOString(),
+    id: transactionId ?? `mock-${Date.now()}`,
+    clubId,
+    type: "menu" as const
   };
 
   const encryptedPayload = await generateEncryptedQR(payload);
