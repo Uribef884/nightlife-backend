@@ -23,6 +23,8 @@ import menuPurchaseRoutes from "./routes/menuPurchases.routes";
 import waiterRoutes from "./routes/waiter.routes";
 import menuQRRoutes from "./routes/menuQR.routes";
 import ticketQRRoutes from "./routes/ticketQR.routes";
+import menuConfigRoutes from "./routes/menuConfig.routes";
+import fileUploadRoutes from "./routes/fileUpload.routes";
 
 dotenv.config();
 
@@ -61,13 +63,14 @@ app.use("/menu/variants", menuVariantRoutes);
 app.use("/menu/cart", menuCartRoutes);
 app.use("/menu/checkout", menuCheckoutRoutes);
 app.use("/menu/purchases", menuPurchaseRoutes);
+app.use("/menu", menuConfigRoutes);
+
+// File Upload System
+app.use("/upload", fileUploadRoutes);
 
 // QR Validation System
-console.log("🔧 Registering QR validation routes...");
 app.use("/validate/menu", menuQRRoutes);
-console.log("✅ Menu QR routes registered at /validate/menu");
 app.use("/validate/ticket", ticketQRRoutes);
-console.log("✅ Ticket QR routes registered at /validate/ticket");
 
 // DB Connection
 AppDataSource.initialize()

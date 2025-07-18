@@ -96,6 +96,7 @@ export const processSuccessfulCheckout = async ({
   const ticketPurchases: TicketPurchase[] = [];
   const user = userId ? await userRepo.findOneBy({ id: userId }) : undefined;
 
+  // First, calculate totals and update ticket quantities
   for (const item of cartItems) {
     const ticket = item.ticket;
     const quantity = item.quantity;
@@ -124,15 +125,44 @@ export const processSuccessfulCheckout = async ({
       totalPlatformReceives += platformFee;
       totalGatewayFee += itemGatewayFee;
       totalGatewayIVA += iva;
+    }
+  }
 
-      const payload = {
-        id: ticket.id,
-        clubId,
-        type: "ticket" as const
-      };
+  // Create and save the purchase transaction first
+  const purchaseTransaction = transactionRepo.create({
+    userId: userId || undefined,
+    clubId,
+    email,
+    date,
+    totalPaid,
+    clubReceives: totalClubReceives,
+    platformReceives: totalPlatformReceives,
+    gatewayFee: totalGatewayFee,
+    gatewayIVA: totalGatewayIVA,
+    retentionICA,
+    retentionIVA,
+    retentionFuente,
+    paymentProviderTransactionId: transactionId,
+    paymentProvider: isFreeCheckout ? "free" : "mock",
+    paymentStatus: "APPROVED",
+  });
 
-      const encryptedPayload = await generateEncryptedQR(payload);
-      const qrDataUrl = await QRCode.toDataURL(encryptedPayload);
+  await transactionRepo.save(purchaseTransaction);
+
+  // Now create the individual ticket purchases and associate them with the transaction
+  for (const item of cartItems) {
+    const ticket = item.ticket;
+    const quantity = item.quantity;
+
+    for (let i = 0; i < quantity; i++) {
+      const basePrice = Number(ticket.price);
+      const platformFee = isFreeCheckout ? 0 : calculatePlatformFee(basePrice, platformFeePercentage);
+      const { totalGatewayFee: itemGatewayFee, iva } = isFreeCheckout
+        ? { totalGatewayFee: 0, iva: 0 }
+        : calculateGatewayFees(basePrice);
+
+      const userPaid = basePrice + platformFee + itemGatewayFee + iva;
+      const clubReceives = basePrice;
 
       const purchase = purchaseRepo.create({
         ticketId: ticket.id,
@@ -146,9 +176,26 @@ export const processSuccessfulCheckout = async ({
         platformReceives: platformFee,
         gatewayFee: itemGatewayFee,
         gatewayIVA: iva,
-        qrCodeEncrypted: encryptedPayload,
         platformFeeApplied: platformFeePercentage,
+        purchaseTransactionId: purchaseTransaction.id,
       });
+
+      // Save purchase first to get the ID
+      await purchaseRepo.save(purchase);
+
+      // Now generate QR with the actual TicketPurchase.id
+      const payload = {
+        id: purchase.id,
+        clubId,
+        type: "ticket" as const
+      };
+
+      const encryptedPayload = await generateEncryptedQR(payload);
+      const qrDataUrl = await QRCode.toDataURL(encryptedPayload);
+
+      // Update the purchase with the QR code
+      purchase.qrCodeEncrypted = encryptedPayload;
+      await purchaseRepo.save(purchase);
 
       ticketPurchases.push(purchase);
 
@@ -168,36 +215,9 @@ export const processSuccessfulCheckout = async ({
     }
   }
 
-  const transactionData: Partial<PurchaseTransaction> = {
-    email,
-    clubId,
-    date,
-    totalPaid,
-    clubReceives: totalClubReceives,
-    platformReceives: totalPlatformReceives,
-    gatewayFee: totalGatewayFee,
-    gatewayIVA: totalGatewayIVA,
-    retentionICA,
-    retentionIVA,
-    retentionFuente,
-    ...(user ? { user } : {}),
-    ...(isFreeCheckout
-      ? {
-          paymentProvider: "free",
-          paymentStatus: "APPROVED", 
-        }
-      : {
-          paymentProviderTransactionId: transactionId!,
-          paymentProvider: "mock",
-          paymentStatus: "PENDING", 
-        }),
-  };
-
-  const transaction = transactionRepo.create(transactionData);
-  await transactionRepo.save(transaction);
-
+  // Associate purchases with the transaction
   for (const purchase of ticketPurchases) {
-    purchase.transaction = transaction;
+    purchase.transaction = purchaseTransaction;
   }
 
   await purchaseRepo.save(ticketPurchases);
@@ -210,7 +230,7 @@ export const processSuccessfulCheckout = async ({
 
   return res.json({
     message: "Checkout completed",
-    transactionId: transaction.id,
+    transactionId: purchaseTransaction.id,
     totalPaid,
     tickets: ticketPurchases.map((p) => ({
       id: p.id,

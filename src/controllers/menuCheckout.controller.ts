@@ -91,15 +91,6 @@ export const processSuccessfulMenuCheckout = async ({
     menuPurchases.push(purchase);
   }
 
-  const payload = {
-    id: transactionId ?? `mock-${Date.now()}`,
-    clubId,
-    type: "menu" as const
-  };
-
-  const encryptedPayload = await generateEncryptedQR(payload);
-  const qrImageDataUrl = await QRCode.toDataURL(encryptedPayload);
-
   const transaction = transactionRepo.create({
     clubId,
     sessionId: sessionId ?? undefined,
@@ -109,18 +100,33 @@ export const processSuccessfulMenuCheckout = async ({
     platformReceives,
     gatewayFee: gatewayFeeTotal,
     gatewayIVA: gatewayIVATotal,
-    qrPayload: encryptedPayload,
     paymentProvider: "mock",
     paymentStatus: "PENDING",
     ...(transactionId ? { paymentProviderTransactionId: transactionId } : {}),
     email,
   });
 
+  // Save transaction first to get the ID
+  await transactionRepo.save(transaction);
+
+  // Now generate QR with the actual MenuPurchaseTransaction.id
+  const payload = {
+    id: transaction.id,
+    clubId,
+    type: "menu" as const
+  };
+
+  const encryptedPayload = await generateEncryptedQR(payload);
+  const qrImageDataUrl = await QRCode.toDataURL(encryptedPayload);
+
+  // Update transaction with the QR payload
+  transaction.qrPayload = encryptedPayload;
+  await transactionRepo.save(transaction);
+
   for (const purchase of menuPurchases) {
     purchase.transaction = transaction;
   }
 
-  await transactionRepo.save(transaction);
   await purchaseRepo.save(menuPurchases);
 
   await sendMenuEmail({

@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { MenuItem } from "../entities/MenuItem";
+import { Club } from "../entities/Club";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { AuthenticatedRequest } from "../types/express";
 import { CartItem } from "../entities/TicketCartItem";
@@ -31,6 +32,7 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
       return;
     }
 
+    // Check menu item and club
     const itemRepo = AppDataSource.getRepository(MenuItem);
     const cartRepo = AppDataSource.getRepository(MenuCartItem);
 
@@ -38,6 +40,21 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
       where: { id: menuItemId },
       relations: ["variants", "club"]
     });
+
+    if (!menuItem) {
+      res.status(404).json({ error: "Menu item not found" });
+      return;
+    }
+
+    // Check if club is in structured menu mode
+    if (menuItem.club.menuType !== "structured") {
+      const errorMessage = menuItem.club.menuType === "none" 
+        ? "This club does not offer menu ordering."
+        : "This club's menu is not available for ordering. Please contact the club directly.";
+      
+      res.status(400).json({ error: errorMessage });
+      return;
+    }
 
     if (!menuItem || !menuItem.isActive) {
       res.status(400).json({ error: "Invalid or inactive menu item" });

@@ -49,8 +49,8 @@ export class TicketPurchase {
   @Column()
   email!: string;
 
-  @Column()
-  qrCodeEncrypted!: string;
+  @Column({ nullable: true })
+  qrCodeEncrypted?: string;
 
   @Column({ default: false })
   isUsed!: boolean;

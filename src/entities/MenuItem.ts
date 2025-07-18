@@ -17,6 +17,9 @@ export class MenuItem {
   @Column({ nullable: true })
   imageUrl?: string;
 
+  @Column({ nullable: true })
+  imageBlurhash?: string;
+
   @Column({
     type: "numeric",
     nullable: true,

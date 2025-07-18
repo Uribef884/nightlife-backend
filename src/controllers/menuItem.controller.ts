@@ -3,6 +3,7 @@ import { AppDataSource } from "../config/data-source";
 import { MenuItem } from "../entities/MenuItem";
 import { MenuCategory } from "../entities/MenuCategory";
 import { MenuItemVariant } from "../entities/MenuItemVariant";
+import { Club } from "../entities/Club";
 import { AuthenticatedRequest } from "../types/express";
 import { sanitizeInput } from "../utils/sanitizeInput";
 
@@ -22,6 +23,22 @@ export const createMenuItem = async (req: AuthenticatedRequest, res: Response): 
 
     if (!user || user.role !== "clubowner") {
       res.status(403).json({ error: "Only club owners can create menu items" });
+      return;
+    }
+
+    // Check if club is in structured menu mode
+    const clubRepo = AppDataSource.getRepository(Club);
+    const club = await clubRepo.findOne({ where: { ownerId: user.id } });
+    
+    if (!club) {
+      res.status(404).json({ error: "Club not found" });
+      return;
+    }
+
+    if (club.menuType !== "structured") {
+      res.status(400).json({ 
+        error: "Club must be in structured menu mode to create menu items. Switch to structured mode first." 
+      });
       return;
     }
 

@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { getRepository } from "typeorm";
+import { AppDataSource } from "../config/data-source";
 import { TicketPurchase } from "../entities/TicketPurchase";
 import { AuthenticatedRequest } from "../types/express";
 import { validateTicketPurchase } from "../utils/validateQRUtils";
@@ -8,10 +8,6 @@ export async function previewTicketQR(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  console.log("🎫 previewTicketQR controller called");
-  console.log("📍 URL:", req.url);
-  console.log("👤 User role:", req.user?.role);
-  
   try {
     const { qrCode } = req.body;
 
@@ -83,7 +79,7 @@ export async function confirmTicketQR(
     }
 
     // Mark as used
-    const purchaseRepository = getRepository(TicketPurchase);
+    const purchaseRepository = AppDataSource.getRepository(TicketPurchase);
     purchase.isUsed = true;
     purchase.usedAt = new Date();
     await purchaseRepository.save(purchase);

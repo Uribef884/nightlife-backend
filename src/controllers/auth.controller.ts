@@ -103,7 +103,7 @@ export async function login(req: Request, res: Response): Promise<void> {
   if (user.role === "clubowner") {
     const club = await AppDataSource.getRepository(Club).findOneBy({ ownerId: user.id });
     if (club) clubId = club.id;
-  } else if (user.role === "bouncer") {
+  } else if (user.role === "bouncer" || user.role === "waiter") {
     clubId = user.clubId;
   }
 

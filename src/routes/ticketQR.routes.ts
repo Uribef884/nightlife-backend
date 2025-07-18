@@ -5,8 +5,6 @@ import { previewTicketQR, confirmTicketQR } from "../controllers/validateTicketQ
 
 const router = Router();
 
-console.log("🎫 Setting up ticket QR routes with bouncer/clubowner middleware");
-
 // Apply authentication middleware to all routes
 router.use(requireAuth);
 

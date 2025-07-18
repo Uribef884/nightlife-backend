@@ -1,5 +1,5 @@
 import { Response } from "express";
-import { getRepository } from "typeorm";
+import { AppDataSource } from "../config/data-source";
 import { MenuPurchaseTransaction } from "../entities/MenuPurchaseTransaction";
 import { AuthenticatedRequest } from "../types/express";
 import { validateMenuTransaction } from "../utils/validateQRUtils";
@@ -8,10 +8,6 @@ export async function previewMenuQR(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
-  console.log("🍽️ previewMenuQR controller called");
-  console.log("📍 URL:", req.url);
-  console.log("👤 User role:", req.user?.role);
-  
   try {
     const { qrCode } = req.body;
 
@@ -85,7 +81,7 @@ export async function confirmMenuQR(
     }
 
     // Mark as used
-    const transactionRepository = getRepository(MenuPurchaseTransaction);
+    const transactionRepository = AppDataSource.getRepository(MenuPurchaseTransaction);
     transaction.isUsed = true;
     transaction.usedAt = new Date();
     await transactionRepository.save(transaction);

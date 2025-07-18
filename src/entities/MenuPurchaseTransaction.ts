@@ -56,8 +56,8 @@ export class MenuPurchaseTransaction {
   @Column("numeric", { nullable: true })
   retentionFuente?: number;
 
-  @Column('text')
-  qrPayload!: string;
+  @Column('text', { nullable: true })
+  qrPayload?: string;
 
   @Column({ default: false })
   isUsed!: boolean;

@@ -5,8 +5,6 @@ import { previewMenuQR, confirmMenuQR } from "../controllers/validateMenuQR.cont
 
 const router = Router();
 
-console.log("🍽️ Setting up menu QR routes with waiter/clubowner middleware");
-
 // Apply authentication middleware to all routes
 router.use(requireAuth);
 

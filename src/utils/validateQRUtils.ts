@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { getRepository } from "typeorm";
+import { AppDataSource } from "../config/data-source";
 import { User } from "../entities/User";
 import { Club } from "../entities/Club";
 import { MenuPurchaseTransaction } from "../entities/MenuPurchaseTransaction";
@@ -17,7 +17,7 @@ export async function validateClubAccess(
 
   // If user is clubowner, check if they own the club
   if (user.role === "clubowner") {
-    const clubRepository = getRepository(Club);
+    const clubRepository = AppDataSource.getRepository(Club);
     const club = await clubRepository.findOne({
       where: { id: clubId, ownerId: user.id }
     });
@@ -39,15 +39,36 @@ export function checkDateIsToday(createdAt: Date): boolean {
 }
 
 export function checkTicketDateIsValid(ticketDate: Date): boolean {
-  const today = new Date();
-  const eventDate = new Date(ticketDate);
+  // Get current time in Colombia timezone (UTC-5)
+  const nowUTC = new Date();
+  const colombiaOffset = -5 * 60; // Colombia is UTC-5
+  const nowColombia = new Date(nowUTC.getTime() + (colombiaOffset * 60 * 1000));
   
-  // Set both dates to start of day for accurate comparison
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const eventDateStart = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate());
+  // Handle date properly to avoid timezone conversion issues
+  const eventDateValue = ticketDate as any;
+  let year: number, month: number, day: number;
   
-  // Ticket is valid if event date is today or in the future
-  return eventDateStart >= todayStart;
+  if (typeof eventDateValue === 'string') {
+    // Parse string date (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)
+    const dateStr = eventDateValue.includes('T') ? eventDateValue.split('T')[0] : eventDateValue;
+    [year, month, day] = dateStr.split('-').map(Number);
+  } else if (eventDateValue instanceof Date) {
+    // Extract components from Date object
+    year = eventDateValue.getFullYear();
+    month = eventDateValue.getMonth() + 1; // getMonth() returns 0-11
+    day = eventDateValue.getDate();
+  } else {
+    // Fallback
+    const dateStr = String(eventDateValue).split('T')[0];
+    [year, month, day] = dateStr.split('-').map(Number);
+  }
+  
+  // Create event start and end times using the parsed components
+  const eventStart = new Date(year, month - 1, day, 0, 0, 0); // Start of day
+  const eventEnd = new Date(year, month - 1, day + 1, 1, 0, 0); // 1 AM next day
+  
+  // Current time should be between event start and event end (1 AM next day)
+  return nowColombia >= eventStart && nowColombia <= eventEnd;
 }
 
 export function validateQRType(type: string, expected: "menu" | "ticket"): boolean {
@@ -73,7 +94,7 @@ export async function validateMenuTransaction(
       return { isValid: false, error: "Missing transaction ID in QR code" };
     }
 
-    const transactionRepository = getRepository(MenuPurchaseTransaction);
+    const transactionRepository = AppDataSource.getRepository(MenuPurchaseTransaction);
     const transaction = await transactionRepository.findOne({
       where: { id: payload.id },
       relations: ["purchases", "purchases.menuItem", "purchases.variant"]
@@ -113,7 +134,7 @@ export async function validateTicketPurchase(
       return { isValid: false, error: "Missing purchase ID in QR code" };
     }
 
-    const purchaseRepository = getRepository(TicketPurchase);
+    const purchaseRepository = AppDataSource.getRepository(TicketPurchase);
     const purchase = await purchaseRepository.findOne({
       where: { id: payload.id },
       relations: ["ticket", "club", "transaction"]
@@ -128,9 +149,48 @@ export async function validateTicketPurchase(
       return { isValid: false, error: "Access denied to this club" };
     }
 
-    // Check if ticket date is valid (not in the past)
+    // Check if ticket date is valid (only valid on event date until 1 AM next day)
     if (!checkTicketDateIsValid(purchase.date)) {
-      return { isValid: false, error: "Ticket is for a past event/date" };
+      // Handle date properly to avoid timezone issues
+      const eventDateValue = purchase.date as any; // TypeORM can return date as string or Date
+      let eventDateStr: string;
+      
+      if (typeof eventDateValue === 'string') {
+        // If it's a string, extract just the date part (YYYY-MM-DD)
+        eventDateStr = eventDateValue.includes('T') ? eventDateValue.split('T')[0] : eventDateValue;
+      } else if (eventDateValue instanceof Date) {
+        // If it's a Date object, format it properly
+        eventDateStr = eventDateValue.toISOString().split('T')[0];
+      } else {
+        // Fallback: convert to string and handle
+        eventDateStr = String(eventDateValue).split('T')[0];
+      }
+      
+      // Parse the date components to create a proper local date
+      const [year, month, day] = eventDateStr.split('-').map(Number);
+      const displayDate = new Date(year, month - 1, day);
+      const eventDateDisplay = displayDate.toLocaleDateString('es-CO', { 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+      
+      const nowUTC = new Date();
+      const colombiaOffset = -5 * 60;
+      const nowColombia = new Date(nowUTC.getTime() + (colombiaOffset * 60 * 1000));
+      const eventStart = new Date(year, month - 1, day);
+      
+      if (nowColombia < eventStart) {
+        return { 
+          isValid: false, 
+          error: `This ticket is for a future event (${eventDateDisplay}). Valid only on event date.` 
+        };
+      } else {
+        return { 
+          isValid: false, 
+          error: `This ticket was for ${eventDateDisplay} and is no longer valid (expired at 1:00 AM next day).` 
+        };
+      }
     }
 
     return { isValid: true, purchase };

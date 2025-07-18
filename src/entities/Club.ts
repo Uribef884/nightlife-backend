@@ -72,6 +72,19 @@ export class Club {
   @Column()
   profileImageBlurhash!: string;
 
+  @Column({ 
+    type: "enum", 
+    enum: ["structured", "pdf", "none"], 
+    default: "structured" 
+  })
+  menuType!: "structured" | "pdf" | "none";
+
+  @Column({ nullable: true })
+  pdfMenuUrl?: string;
+
+  @Column({ nullable: true })
+  pdfMenuName?: string;
+
   @ManyToOne(() => User)
   owner!: User;
 
