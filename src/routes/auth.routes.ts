@@ -8,7 +8,10 @@ import {
   logout,
   forgotPassword,
   resetPassword,
-  getCurrentUser
+  getCurrentUser,
+  googleAuth,
+  googleCallback,
+  googleTokenAuth
 } from "../controllers/auth.controller";
 import { isAdmin } from "../middlewares/isAdmin";
 import { requireAuth } from "../middlewares/requireAuth";
@@ -25,6 +28,11 @@ router.post("/login", rateLimiter, honeypotMiddleware, validateAuthInput(), logi
 // ✅ Forgot/reset password
 router.post("/forgot-password", rateLimiter, honeypotMiddleware, forgotPassword);
 router.post("/reset-password", resetPassword);
+
+// ✅ Google OAuth routes
+router.get("/google", googleAuth);
+router.get("/google/callback", googleCallback);
+router.post("/google/token", rateLimiter, googleTokenAuth);
 
 // Authenticated user routes
 router.post("/logout", requireAuth, logout);

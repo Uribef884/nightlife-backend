@@ -16,42 +16,44 @@ export class ImageService {
     maxHeight: number = parseInt(process.env.IMAGE_MAX_HEIGHT || '1080'),
     quality: number = parseInt(process.env.IMAGE_QUALITY_COMPRESSED || '80')
   ): Promise<ProcessedImage> {
-    // First, get the processed image dimensions
-    const sharpImage = sharp(inputBuffer)
-      .resize(maxWidth, maxHeight, {
-        fit: 'inside',
-        withoutEnlargement: true,
-      });
+    // Resize main image
+    const sharpImage = sharp(inputBuffer).resize(maxWidth, maxHeight, {
+      fit: 'inside',
+      withoutEnlargement: true,
+    });
 
-    // Get the metadata after resize
     const metadata = await sharpImage.metadata();
     const width = metadata.width!;
     const height = metadata.height!;
 
-    // Generate the JPEG buffer
-    const jpegBuffer = await sharpImage
-      .jpeg({ quality })
-      .toBuffer();
+    // Final optimized JPEG
+    const jpegBuffer = await sharpImage.jpeg({ quality }).toBuffer();
 
-    // Generate RGB data for BlurHash using a smaller size for better performance
-    const blurWidth = Math.min(width, 32);
-    const blurHeight = Math.min(height, 32);
-    
-    const rgbBuffer = await sharp(inputBuffer)
-      .resize(blurWidth, blurHeight, {
-        fit: 'fill' // Ensure exact dimensions
-      })
-      .removeAlpha()
-      .raw()
-      .toBuffer();
+    // Set default fallback blurhash
+    let blurhash: string = 'LKN]Rv%2Tw=w]~RBVZRi};RPxuwH';
 
-    const blurhash = encode(
-      new Uint8ClampedArray(rgbBuffer),
-      blurWidth,
-      blurHeight,
-      4,
-      4
-    );
+    try {
+      const { data: rawBuffer, info } = await sharp(jpegBuffer)
+        .resize(32, 32, {
+          fit: 'contain',
+          background: { r: 0, g: 0, b: 0 },
+        })
+        .ensureAlpha() // ✅ Force RGBA output (required by blurhash)
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+
+      const pixels = new Uint8ClampedArray(Uint8Array.from(rawBuffer));
+      const expectedLength = info.width * info.height * 4;
+
+      if (pixels.length !== expectedLength) {
+        throw new Error(`❌ BlurHash mismatch: expected ${expectedLength}, got ${pixels.length}`);
+      }
+
+      blurhash = encode(pixels, info.width, info.height, 4, 4);
+    } catch (error) {
+      console.error(`❌ BlurHash failed:`, error);
+      // fallback blurhash already assigned
+    }
 
     return {
       buffer: jpegBuffer,
@@ -75,4 +77,4 @@ export class ImageService {
       .jpeg({ quality: 70 })
       .toBuffer();
   }
-} 
+}

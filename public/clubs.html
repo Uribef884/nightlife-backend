@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <title>Nightlife Clubs</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- BlurHash decoder library -->
+  <script src="https://cdn.jsdelivr.net/npm/blurhash@2.0.5/dist/blurhash.umd.js"></script>
   <style>
     body {
       font-family: 'Segoe UI', Arial, sans-serif;
@@ -31,16 +33,47 @@
     .club-card {
       background: #23243a;
       border-radius: 10px;
-      padding: 18px 20px;
-      min-width: 260px;
-      flex: 1 1 260px;
+      padding: 0;
+      min-width: 280px;
+      flex: 1 1 280px;
       cursor: pointer;
       border: 2px solid transparent;
       transition: border 0.2s;
+      overflow: hidden;
     }
     .club-card:hover {
       border: 2px solid #a78bfa;
       background: #28294a;
+    }
+    .club-image-container {
+      position: relative;
+      width: 100%;
+      height: 160px;
+      overflow: hidden;
+    }
+    .club-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: opacity 0.3s ease;
+    }
+    .club-image.loading {
+      opacity: 0;
+    }
+    .club-blurhash {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      filter: blur(0);
+      transition: opacity 0.3s ease;
+    }
+    .club-blurhash.hidden {
+      opacity: 0;
+    }
+    .club-content {
+      padding: 18px 20px;
     }
     .club-id {
       font-size: 0.8em;
@@ -75,29 +108,95 @@
       font-weight: bold;
       margin-right: 8px;
     }
-    .ticket-list, .menu-list, .category-list {
+    .ticket-list, .menu-list, .category-list, .event-list {
       margin: 0;
       padding: 0;
       list-style: none;
     }
-    .ticket-item, .menu-item, .variant-item {
+    .ticket-item, .menu-item, .variant-item, .event-item {
       background: #18192a;
       border-radius: 6px;
       margin-bottom: 10px;
       padding: 10px 14px;
       border-left: 4px solid #a78bfa;
     }
-    .ticket-id, .menu-id, .variant-id, .category-id {
+    .ticket-id, .menu-id, .variant-id, .category-id, .event-id {
       font-size: 0.8em;
       color: #a78bfa;
       margin-bottom: 2px;
       display: block;
     }
-    .category-title {
+    .category-title, .event-title {
       color: #f472b6;
       font-size: 1.1em;
       margin-bottom: 6px;
       margin-top: 18px;
+    }
+    .event-banner-container {
+      position: relative;
+      width: 100%;
+      height: 120px;
+      overflow: hidden;
+      border-radius: 6px;
+      margin-bottom: 10px;
+    }
+    .event-banner {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: opacity 0.3s ease;
+    }
+    .event-banner.loading {
+      opacity: 0;
+    }
+    .event-banner-blurhash {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      filter: blur(0);
+      transition: opacity 0.3s ease;
+    }
+    .event-banner-blurhash.hidden {
+      opacity: 0;
+    }
+    .menu-item-image-container {
+      position: relative;
+      width: 60px;
+      height: 60px;
+      overflow: hidden;
+      border-radius: 4px;
+      margin-right: 12px;
+      float: left;
+    }
+    .menu-item-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: opacity 0.3s ease;
+    }
+    .menu-item-image.loading {
+      opacity: 0;
+    }
+    .menu-item-image-blurhash {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      filter: blur(0);
+      transition: opacity 0.3s ease;
+    }
+    .menu-item-image-blurhash.hidden {
+      opacity: 0;
+    }
+    .menu-item-content {
+      overflow: hidden;
+    }
+    .menu-item-with-image {
+      display: flex;
+      align-items: flex-start;
     }
     .back-btn {
       background: #a78bfa;

@@ -132,7 +132,7 @@ export const processSuccessfulCheckout = async ({
   const purchaseTransaction = transactionRepo.create({
     userId: userId || undefined,
     clubId,
-    email,
+        email,
     date,
     totalPaid,
     clubReceives: totalClubReceives,

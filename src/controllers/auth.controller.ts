@@ -12,6 +12,7 @@ import { authSchemaRegister } from "../schemas/auth.schema";
 import { forgotPasswordSchema, resetPasswordSchema } from "../schemas/forgot.schema";
 import { sendPasswordResetEmail } from "../services/emailService"; 
 import { MenuCartItem } from "../entities/MenuCartItem";
+import { OAuthService, GoogleUserInfo } from "../services/oauthService";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 const RESET_SECRET = process.env.RESET_SECRET || "dev-reset-secret";
@@ -45,7 +46,12 @@ export async function register(req: Request, res: Response): Promise<void> {
     }
 
     const hashed = await bcrypt.hash(password, 10);
-    const user = repo.create({ email, password: hashed, role: "user" });
+    const user = repo.create({ 
+      email, 
+      password: hashed, 
+      role: "user",
+      isOAuthUser: false
+    });
     await repo.save(user);
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
@@ -75,6 +81,12 @@ export async function login(req: Request, res: Response): Promise<void> {
 
   if (!user) {
     res.status(401).json({ error: "Invalid credentials" });
+    return;
+  }
+
+  // Check if user has a password (not OAuth user)
+  if (!user.password) {
+    res.status(401).json({ error: "Please sign in with Google" });
     return;
   }
 
@@ -312,3 +324,290 @@ export const getCurrentUser = async (
   const { id, email, role, clubId } = user;
   res.json({ id, email, role, clubId });
 };
+
+// ================================
+// GOOGLE OAUTH CONTROLLERS
+// ================================
+
+/**
+ * GET /auth/google - Initiate Google OAuth flow
+ */
+export async function googleAuth(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    // Check if required environment variables are set
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+      console.error('❌ Missing Google OAuth environment variables');
+      res.status(500).json({ 
+        error: "Google OAuth not configured",
+        missing: [
+          !process.env.GOOGLE_CLIENT_ID && 'GOOGLE_CLIENT_ID',
+          !process.env.GOOGLE_CLIENT_SECRET && 'GOOGLE_CLIENT_SECRET',
+          !process.env.GOOGLE_REDIRECT_URI && 'GOOGLE_REDIRECT_URI'
+        ].filter(Boolean)
+      });
+      return;
+    }
+
+    // Pass sessionId in state to preserve cart during OAuth flow
+    const sessionId = req.sessionId;
+    console.log('🔍 Initiating Google OAuth flow:', {
+      sessionId: sessionId || 'none',
+      redirectUri: process.env.GOOGLE_REDIRECT_URI
+    });
+    
+    const authUrl = OAuthService.getGoogleAuthUrl(sessionId || undefined);
+    console.log('🔗 Redirecting to Google OAuth URL:', authUrl);
+    
+    res.redirect(authUrl);
+  } catch (error) {
+    console.error("❌ Error initiating Google OAuth:", error);
+    res.status(500).json({ error: "Failed to initiate Google authentication" });
+  }
+}
+
+/**
+ * GET /auth/google/callback - Handle Google OAuth callback
+ */
+export async function googleCallback(req: Request, res: Response): Promise<void> {
+  try {
+    const { code, state, error, error_description } = req.query;
+    
+    // Log all query parameters for debugging
+    console.log('🔍 OAuth callback received:', {
+      code: code ? 'present' : 'missing',
+      state: state || 'none',
+      error: error || 'none',
+      error_description: error_description || 'none',
+      allParams: req.query
+    });
+    
+    // Handle OAuth errors from Google
+    if (error) {
+      console.error('❌ Google OAuth error:', error, error_description);
+      res.redirect(`/clubs.html?error=oauth_${error}`);
+      return;
+    }
+    
+    if (!code) {
+      console.error('❌ Missing authorization code in OAuth callback');
+      res.status(400).json({ 
+        error: "Missing authorization code",
+        received_params: req.query,
+        help: "This endpoint should only be accessed via Google OAuth flow. Start at /auth/google"
+      });
+      return;
+    }
+
+    // Verify Google token and get user info
+    const googleUser = await OAuthService.verifyGoogleToken(code as string);
+    
+    if (!googleUser.emailVerified) {
+      res.status(400).json({ error: "Google email not verified" });
+      return;
+    }
+
+    // Check for disposable email
+    if (isDisposableEmail(googleUser.email)) {
+      res.status(403).json({ error: "Email domain not allowed" });
+      return;
+    }
+
+    const userRepo = AppDataSource.getRepository(User);
+    let user = await userRepo.findOneBy({ email: googleUser.email });
+
+    if (user) {
+      // Existing user - update OAuth info if not already set
+      if (!user.isOAuthUser) {
+        user.googleId = googleUser.googleId;
+        user.firstName = googleUser.firstName;
+        user.lastName = googleUser.lastName;
+        user.avatar = googleUser.avatar;
+        user.isOAuthUser = true;
+        await userRepo.save(user);
+      }
+    } else {
+      // New user - create with OAuth info
+      user = userRepo.create({
+        email: googleUser.email,
+        googleId: googleUser.googleId,
+        firstName: googleUser.firstName,
+        lastName: googleUser.lastName,
+        avatar: googleUser.avatar,
+        role: "user",
+        isOAuthUser: true,
+      });
+      await userRepo.save(user);
+    }
+
+    // Handle cart migration from sessionId (if exists)
+    const sessionId = state as string;
+    if (sessionId) {
+      await clearAnonymousCart(sessionId);
+    }
+
+    // Get clubId for clubowner/bouncer/waiter
+    let clubId: string | undefined = undefined;
+    if (user.role === "clubowner") {
+      const club = await AppDataSource.getRepository(Club).findOneBy({ ownerId: user.id });
+      if (club) clubId = club.id;
+    } else if (user.role === "bouncer" || user.role === "waiter") {
+      clubId = user.clubId;
+    }
+
+    // Create JWT token
+    const token = jwt.sign(
+      {
+        id: user.id,
+        role: user.role,
+        email: user.email,
+        ...(clubId ? { clubId } : {}),
+      },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    // Set secure cookie
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    // Clear sessionId cookie if it exists
+    if (sessionId) {
+      res.clearCookie("sessionId", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+      });
+    }
+
+    // Redirect to success page
+    const redirectUrl = `/clubs.html?oauth=success`; // Always redirect to our test page for now
+    
+    res.redirect(redirectUrl);
+
+  } catch (error) {
+    console.error("❌ Error in Google OAuth callback:", error);
+    res.redirect(`/clubs.html?error=oauth_failed`);
+  }
+}
+
+/**
+ * POST /auth/google/token - Verify Google ID token (for frontend integration)
+ */
+export async function googleTokenAuth(req: Request, res: Response): Promise<void> {
+  try {
+    const { idToken } = req.body;
+    const typedReq = req as AuthenticatedRequest;
+    
+    if (!idToken) {
+      res.status(400).json({ error: "Missing Google ID token" });
+      return;
+    }
+
+    // Verify Google ID token
+    const googleUser = await OAuthService.verifyGoogleIdToken(idToken);
+    
+    if (!googleUser.emailVerified) {
+      res.status(400).json({ error: "Google email not verified" });
+      return;
+    }
+
+    // Check for disposable email
+    if (isDisposableEmail(googleUser.email)) {
+      res.status(403).json({ error: "Email domain not allowed" });
+      return;
+    }
+
+    const userRepo = AppDataSource.getRepository(User);
+    let user = await userRepo.findOneBy({ email: googleUser.email });
+
+    if (user) {
+      // Existing user - update OAuth info if not already set
+      if (!user.isOAuthUser) {
+        user.googleId = googleUser.googleId;
+        user.firstName = googleUser.firstName;
+        user.lastName = googleUser.lastName;
+        user.avatar = googleUser.avatar;
+        user.isOAuthUser = true;
+        await userRepo.save(user);
+      }
+    } else {
+      // New user - create with OAuth info
+      user = userRepo.create({
+        email: googleUser.email,
+        googleId: googleUser.googleId,
+        firstName: googleUser.firstName,
+        lastName: googleUser.lastName,
+        avatar: googleUser.avatar,
+        role: "user",
+        isOAuthUser: true,
+      });
+      await userRepo.save(user);
+    }
+
+    // Handle cart migration from sessionId
+    const sessionId = typedReq.sessionId;
+    if (sessionId) {
+      await clearAnonymousCart(sessionId);
+    }
+
+    // Get clubId for clubowner/bouncer/waiter
+    let clubId: string | undefined = undefined;
+    if (user.role === "clubowner") {
+      const club = await AppDataSource.getRepository(Club).findOneBy({ ownerId: user.id });
+      if (club) clubId = club.id;
+    } else if (user.role === "bouncer" || user.role === "waiter") {
+      clubId = user.clubId;
+    }
+
+    // Create JWT token
+    const token = jwt.sign(
+      {
+        id: user.id,
+        role: user.role,
+        email: user.email,
+        ...(clubId ? { clubId } : {}),
+      },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    // Set secure cookie
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    // Clear sessionId cookie
+    if (sessionId) {
+      res.clearCookie("sessionId", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+      });
+    }
+
+    res.json({
+      message: "Google authentication successful",
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        avatar: user.avatar,
+        isOAuthUser: user.isOAuthUser,
+        ...(clubId ? { clubId } : {}),
+      },
+    });
+
+  } catch (error) {
+    console.error("❌ Error in Google token authentication:", error);
+    res.status(500).json({ error: "Failed to authenticate with Google" });
+  }
+}

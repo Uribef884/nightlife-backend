@@ -21,6 +21,7 @@ export class S3Service {
     contentType: string,
     key: string
   ): Promise<UploadResult> {
+    
     const params = {
       Bucket: bucket,
       Key: key,
@@ -28,7 +29,7 @@ export class S3Service {
       ContentType: contentType,
       // ACL removed - bucket policy handles public access
     };
-
+    
     const result = await s3.upload(params).promise();
     
     return {
@@ -39,20 +40,22 @@ export class S3Service {
   }
 
   static async deleteFile(key: string): Promise<void> {
+    
     const params = {
       Bucket: bucket,
       Key: key,
     };
-
-    await s3.deleteObject(params).promise();
+    
+    const result = await s3.deleteObject(params).promise();
   }
 
   static generateKey(clubId: string, type: string, fileName?: string): string {
     const uuid = uuidv4();
+    const timestamp = Date.now();
     
     switch (type) {
       case 'menu-pdf':
-        return `clubs/${clubId}/menu/current-menu.pdf`;
+        return `clubs/${clubId}/menu/menu-${timestamp}.pdf`;
       case 'profile-image':
         return `clubs/${clubId}/profile/${uuid}.jpg`;
       case 'menu-item-image':

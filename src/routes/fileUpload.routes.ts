@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware';
 import { upload, validatePdfUpload, validateImageUpload } from '../middlewares/uploadMiddleware';
-import {
-  uploadMenuPdf,
+import { 
+  uploadMenuPdf, 
   removePdfMenu,
   uploadClubProfileImage,
   uploadMenuItemImage,

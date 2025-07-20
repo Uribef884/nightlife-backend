@@ -19,14 +19,30 @@ export class User {
   @Column({ unique: true })
   email!: string;
 
-  @Column()
-  password!: string;
+  @Column({ nullable: true })
+  password?: string;
 
   @Column({
     type: "varchar",
     default: "user",
   })
   role!: UserRole;
+
+  // OAuth fields
+  @Column({ nullable: true })
+  googleId?: string;
+
+  @Column({ nullable: true })
+  firstName?: string;
+
+  @Column({ nullable: true })
+  lastName?: string;
+
+  @Column({ nullable: true })
+  avatar?: string;
+
+  @Column({ default: false })
+  isOAuthUser!: boolean;
 
   @ManyToOne(() => Club, { onDelete: "SET NULL" })
   @JoinColumn({ name: "clubId" })

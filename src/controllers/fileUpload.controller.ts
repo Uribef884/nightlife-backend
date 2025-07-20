@@ -48,6 +48,7 @@ export const uploadMenuPdf = async (req: AuthenticatedRequest, res: Response): P
 
     // Upload new PDF
     const key = S3Service.generateKey(user.clubId, 'menu-pdf');
+    
     const uploadResult = await S3Service.uploadFile(
       file.buffer,
       file.mimetype,
@@ -60,16 +61,20 @@ export const uploadMenuPdf = async (req: AuthenticatedRequest, res: Response): P
     await clubRepo.save(club);
 
     // Delete old PDF from S3 if upload and DB update were successful
-    if (oldPdfUrl) {
+    // Skip deletion if old and new URLs are the same (same S3 key, file was overwritten)
+    if (oldPdfUrl && oldPdfUrl !== uploadResult.url) {
       try {
-        const urlParts = oldPdfUrl.split('/');
-        const oldKey = urlParts.slice(3).join('/'); // Remove https://bucket.s3.region.amazonaws.com/
+        // Parse the S3 URL to extract the key
+        const url = new URL(oldPdfUrl);
+        const oldKey = url.pathname.substring(1); // Remove leading slash
+        
         await S3Service.deleteFile(oldKey);
-        console.log(`✅ Deleted old PDF: ${oldKey}`);
       } catch (deleteError) {
         console.error('⚠️ Warning: Failed to delete old PDF from S3:', deleteError);
         // Don't fail the request - new PDF is already uploaded successfully
       }
+    } else if (oldPdfUrl === uploadResult.url) {
+      console.log(`⏭️ Skipping deletion - old and new URLs are identical (file was overwritten)`);
     }
 
     res.json({
@@ -115,20 +120,27 @@ export const removePdfMenu = async (req: AuthenticatedRequest, res: Response): P
 
     // Extract S3 key from URL to delete from S3
     try {
-      const urlParts = club.pdfMenuUrl.split('/');
-      const key = urlParts.slice(3).join('/'); // Remove https://bucket.s3.region.amazonaws.com/
+      // Parse the S3 URL to extract the key
+      // URL format: https://bucket-name.s3.region.amazonaws.com/key/path
+      const url = new URL(club.pdfMenuUrl);
+      const key = url.pathname.substring(1); // Remove leading slash
+      
+      console.log(`🔍 Parsed URL pathname: ${url.pathname}`);
+      console.log(`🗑️ Attempting to delete S3 key: ${key}`);
       
       // Delete from S3
       await S3Service.deleteFile(key);
+      console.log(`✅ Successfully deleted S3 key: ${key}`);
     } catch (s3Error) {
       console.error('Error deleting file from S3:', s3Error);
       // Continue with database cleanup even if S3 deletion fails
     }
 
-    // Clear PDF menu info from database
-    club.pdfMenuUrl = undefined;
-    club.pdfMenuName = undefined;
-    await clubRepo.save(club);
+    // Clear PDF menu info from database - use update to explicitly set NULL
+    await clubRepo.update(club.id, {
+      pdfMenuUrl: null as any,
+      pdfMenuName: null as any
+    });
 
     res.json({
       message: 'PDF menu removed successfully'
@@ -186,8 +198,11 @@ export const uploadClubProfileImage = async (req: AuthenticatedRequest, res: Res
     // Delete old image from S3 if upload and DB update were successful
     if (oldImageUrl) {
       try {
-        const urlParts = oldImageUrl.split('/');
-        const oldKey = urlParts.slice(3).join('/'); // Remove https://bucket.s3.region.amazonaws.com/
+        // Parse the S3 URL to extract the key
+        const url = new URL(oldImageUrl);
+        const oldKey = url.pathname.substring(1); // Remove leading slash
+        
+        console.log(`🗑️ Attempting to delete old profile image with key: ${oldKey}`);
         await S3Service.deleteFile(oldKey);
         console.log(`✅ Deleted old profile image: ${oldKey}`);
       } catch (deleteError) {
@@ -250,12 +265,14 @@ export const uploadMenuItemImage = async (req: AuthenticatedRequest, res: Respon
     await itemRepo.save(item);
 
     // Delete old image from S3 if upload and DB update were successful
-    if (oldImageUrl) {
+    // Only delete if the URLs are different (same key = same URL = no deletion needed)
+    if (oldImageUrl && oldImageUrl !== uploadResult.url) {
       try {
-        const urlParts = oldImageUrl.split('/');
-        const oldKey = urlParts.slice(3).join('/'); // Remove https://bucket.s3.region.amazonaws.com/
+        // Parse the S3 URL to extract the key
+        const url = new URL(oldImageUrl);
+        const oldKey = url.pathname.substring(1); // Remove leading slash
+        
         await S3Service.deleteFile(oldKey);
-        console.log(`✅ Deleted old menu item image: ${oldKey}`);
       } catch (deleteError) {
         console.error('⚠️ Warning: Failed to delete old menu item image from S3:', deleteError);
         // Don't fail the request - new image is already uploaded successfully
@@ -281,17 +298,22 @@ export const uploadEventBanner = async (req: AuthenticatedRequest, res: Response
     const { eventId } = req.params;
     const file = req.file!; // Guaranteed to exist due to middleware validation
 
+
     // Only club owners can upload event banners
     if (user.role !== "admin" && user.role !== "clubowner") {
+      console.log('❌ Access denied - user role:', user.role);
       res.status(403).json({ error: "Only club owners can upload event banners" });
       return;
     }
+
 
     // Verify event ownership
     const eventRepo = AppDataSource.getRepository(Event);
     const event = await eventRepo.findOne({ where: { id: eventId } });
 
+
     if (!event || event.clubId !== user.clubId) {
+      console.log('❌ Event not found or unauthorized');
       res.status(404).json({ error: 'Event not found or unauthorized' });
       return;
     }
@@ -301,13 +323,17 @@ export const uploadEventBanner = async (req: AuthenticatedRequest, res: Response
 
     // Process image
     const processed = await ImageService.processImage(file.buffer);
-    
+
     const key = S3Service.generateKey(event.clubId, 'event-banner', eventId);
+
+    
+
     const uploadResult = await S3Service.uploadFile(
       processed.buffer,
       'image/jpeg',
       key
     );
+
 
     // Update event
     event.bannerUrl = uploadResult.url;
@@ -315,26 +341,26 @@ export const uploadEventBanner = async (req: AuthenticatedRequest, res: Response
     await eventRepo.save(event);
 
     // Delete old banner from S3 if upload and DB update were successful
-    if (oldBannerUrl) {
+    // Only delete if the URLs are different (same key = same URL = no deletion needed)
+    if (oldBannerUrl && oldBannerUrl !== uploadResult.url) {
       try {
-        const urlParts = oldBannerUrl.split('/');
-        const oldKey = urlParts.slice(3).join('/'); // Remove https://bucket.s3.region.amazonaws.com/
+        // Parse the S3 URL to extract the key
+        const url = new URL(oldBannerUrl);
+        const oldKey = url.pathname.substring(1); // Remove leading slash
+        
         await S3Service.deleteFile(oldKey);
-        console.log(`✅ Deleted old event banner: ${oldKey}`);
       } catch (deleteError) {
         console.error('⚠️ Warning: Failed to delete old event banner from S3:', deleteError);
         // Don't fail the request - new banner is already uploaded successfully
       }
+    } else if (oldBannerUrl === uploadResult.url) {
+      console.log('⏭️ Skipping deletion - old and new URLs are identical (file was overwritten)');
     }
 
-    res.json({
-      message: 'Event banner uploaded successfully',
-      imageUrl: uploadResult.url,
-      blurhash: processed.blurhash,
-      eventId: event.id
-    });
   } catch (error) {
-    console.error('Error uploading event banner:', error);
+    console.error('❌ Error uploading event banner:', error);
     res.status(500).json({ error: 'Failed to upload event banner' });
   }
-}; 
+};
+
+ 

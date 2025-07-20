@@ -22,7 +22,8 @@ export const getEventsByClubId = async (req: Request, res: Response) => {
     const eventRepo = AppDataSource.getRepository(Event);
     const events = await eventRepo.find({
       where: { clubId },
-      relations: ["club"],
+      relations: ["club", "tickets"],
+      order: { availableDate: "ASC", createdAt: "DESC" }
     });
     res.status(200).json(events);
   } catch (err) {
@@ -183,10 +184,11 @@ export const deleteEvent = async (req: AuthenticatedRequest, res: Response) => {
     if (bannerUrl) {
       try {
         const { S3Service } = await import("../services/s3Service");
-        const urlParts = bannerUrl.split('/');
-        const key = urlParts.slice(3).join('/'); // Remove https://bucket.s3.region.amazonaws.com/
+        // Parse the S3 URL to extract the key
+        const url = new URL(bannerUrl);
+        const key = url.pathname.substring(1); // Remove leading slash
+        
         await S3Service.deleteFile(key);
-        console.log(`✅ Deleted event banner from S3: ${key}`);
       } catch (deleteError) {
         console.error('⚠️ Warning: Failed to delete event banner from S3:', deleteError);
         // Don't fail the request - event is already deleted

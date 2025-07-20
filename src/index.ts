@@ -40,7 +40,16 @@ app.use(cookieParser()); // must come before attachSessionId
 app.use(attachSessionId); // injects sessionId or user
 
 app.use(cors());
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "https://unpkg.com", "https://cdn.jsdelivr.net"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:", "blob:"],
+    },
+  },
+}));
 
 // ✅ Static HTML for testing (optional)
 app.use(express.static("public"));
