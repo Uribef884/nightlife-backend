@@ -6,7 +6,8 @@ import {
   removePdfMenu,
   uploadClubProfileImage,
   uploadMenuItemImage,
-  uploadEventBanner
+  uploadEventBanner,
+  uploadAdImage
 } from '../controllers/fileUpload.controller';
 
 const router = Router();
@@ -26,5 +27,8 @@ router.post('/menu-item/:itemId/image', upload.single('image'), validateImageUpl
 
 // Event banner image
 router.post('/event/:eventId/banner', upload.single('image'), validateImageUpload, uploadEventBanner);
+
+// Ad image upload
+router.post('/ad/:adId/image', upload.single('image'), uploadAdImage);
 
 export default router; 

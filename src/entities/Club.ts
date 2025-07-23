@@ -51,8 +51,8 @@ export class Club {
   @Column({ nullable: true })
   whatsapp?: string;
 
-  @Column()
-  openHours!: string;
+  @Column('jsonb', { nullable: true })
+  openHours!: { day: string, open: string, close: string }[];
 
   @Column({ nullable: true })
   dressCode?: string;

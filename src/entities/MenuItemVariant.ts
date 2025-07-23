@@ -12,7 +12,7 @@ export class MenuItemVariant {
   @Column('decimal')
   price!: number;
   
-  @Column({ default: false })
+  @Column({ default: true })
   dynamicPricingEnabled!: boolean;
 
   @Column()

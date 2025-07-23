@@ -7,7 +7,8 @@ import {
   updateTicket,
   deleteTicket,
   toggleTicketVisibility,
-  getTicketsForMyClub
+  getTicketsForMyClub,
+  toggleTicketDynamicPricing
 } from "../controllers/ticket.controller";
 import { authMiddleware, requireClubOwnerOrAdmin } from "../middlewares/authMiddleware";
 import { validateTicketInput } from "../utils/ticketValidators";
@@ -26,5 +27,6 @@ router.post("/", authMiddleware, requireClubOwnerOrAdmin, validateTicketInput ,c
 router.put("/:id", authMiddleware, requireClubOwnerOrAdmin, updateTicket);
 router.delete("/:id", authMiddleware, requireClubOwnerOrAdmin, deleteTicket);
 router.patch("/:id/hide", authMiddleware, requireClubOwnerOrAdmin, toggleTicketVisibility);
+router.patch('/:id/toggle-dynamic-pricing', authMiddleware, requireClubOwnerOrAdmin, toggleTicketDynamicPricing);
 
 export default router;

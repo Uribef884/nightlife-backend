@@ -68,3 +68,18 @@ export const requireClubOwnerOrAdmin = (req: Request, res: Response, next: NextF
 
   res.status(403).json({ error: "Forbidden: You are not authorized" });
 };
+
+export const requireClubOwnerAuth = (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void => {
+  const user = req.user;
+
+  if (!user || user.role !== "clubowner") {
+    res.status(403).json({ error: "Forbidden: Club owners only" });
+    return;
+  }
+
+  next();
+};

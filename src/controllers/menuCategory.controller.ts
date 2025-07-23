@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { MenuCategory } from "../entities/MenuCategory";
 import { MenuItem } from "../entities/MenuItem";
-import { computeDynamicPrice } from "../utils/dynamicPricing";
+// import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { sanitizeInput } from "../utils/sanitizeInput";
 import { AuthenticatedRequest } from "../types/express";
 
@@ -17,8 +17,8 @@ export const getAllMenuCategories = async (req: Request, res: Response) => {
       categories.map(async (category) => {
         const menuItemsWithPrice = await Promise.all(
           category.items.map(async (item: MenuItem) => {
-            const dynamicPrice = computeDynamicPrice({basePrice: item.hasVariants ? 0 : item.price!, clubOpenDays: item.club.openDays, openHours: item.club.openHours });
-            return { ...item, dynamicPrice };
+            // const dynamicPrice = computeDynamicPrice({basePrice: item.hasVariants ? 0 : item.price!, clubOpenDays: item.club.openDays, openHours: item.club.openHours });
+            return { ...item, dynamicPrice: null }; // Commented out dynamic pricing
           })
         );
         return { ...category, items: menuItemsWithPrice };

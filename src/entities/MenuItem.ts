@@ -30,7 +30,7 @@ export class MenuItem {
   })
   price?: number; // optional if hasVariants is true
 
-  @Column({ default: false })
+  @Column({ default: true })
   dynamicPricingEnabled!: boolean;
 
   @ManyToOne(() => Club, (club) => club.menuItems)

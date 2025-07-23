@@ -2,7 +2,7 @@ import { Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { CartItem } from "../entities/TicketCartItem";
 import { AuthenticatedRequest } from "../types/express";
-import { computeDynamicPrice } from "../utils/dynamicPricing";
+// import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { Ticket } from "../entities/Ticket";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { toZonedTime, format } from "date-fns-tz";
@@ -106,20 +106,20 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       }
     }
 
-    const unitPrice = ticket.dynamicPricingEnabled
-      ? computeDynamicPrice({
-          basePrice: ticket.price,
-          clubOpenDays: ticket.club.openDays,
-          openHours: ticket.club.openHours,
-          availableDate: new Date(`${date}T00:00:00`),
-          useDateBasedLogic: !!ticket.eventId
-        })
-      : ticket.price;
+    // const unitPrice = ticket.dynamicPricingEnabled
+    //   ? computeDynamicPrice({
+    //       basePrice: ticket.price,
+    //       clubOpenDays: ticket.club.openDays,
+    //       openHours: ticket.club.openHours,
+    //       availableDate: new Date(`${date}T00:00:00`),
+    //       useDateBasedLogic: !!ticket.eventId
+    //     })
+    //   : ticket.price;
 
-    if (unitPrice < 0) {
-      res.status(400).json({ error: "Invalid ticket pricing configuration" });
-      return;
-    }
+    // if (unitPrice < 0) {
+    //   res.status(400).json({ error: "Invalid ticket pricing configuration" });
+    //   return;
+    // }
 
     const existing = await cartRepo.findOne({
       where: userId ? { userId, ticketId, date } : { sessionId, ticketId, date }
@@ -133,7 +133,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       }
 
       existing.quantity = newTotal;
-      existing.unitPrice = unitPrice;
+      // existing.unitPrice = unitPrice;
       await cartRepo.save(existing);
       res.status(200).json(existing);
       return;
@@ -144,7 +144,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       ticket,
       date,
       quantity,
-      unitPrice,
+      // unitPrice,
       ...(userId ? { userId } : { sessionId }),
     });
 
@@ -214,21 +214,21 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
       }
     }
 
-    const unitPrice = computeDynamicPrice({
-      basePrice: ticket.price,
-      clubOpenDays: ticket.club.openDays,
-      openHours: ticket.club.openHours,
-      availableDate: new Date(`${item.date}T00:00:00`),
-      useDateBasedLogic: !!ticket.eventId
-    });
+    // const unitPrice = computeDynamicPrice({
+    //   basePrice: ticket.price,
+    //   clubOpenDays: ticket.club.openDays,
+    //   openHours: ticket.club.openHours,
+    //   availableDate: new Date(`${item.date}T00:00:00`),
+    //   useDateBasedLogic: !!ticket.eventId
+    // });
 
-    if (unitPrice < 0) {
-      res.status(400).json({ error: "Invalid ticket pricing configuration" });
-      return;
-    }
+    // if (unitPrice < 0) {
+    //   res.status(400).json({ error: "Invalid ticket pricing configuration" });
+    //   return;
+    // }
 
     item.quantity = quantity;
-    item.unitPrice = unitPrice;
+    // item.unitPrice = unitPrice;
 
     await cartRepo.save(item);
     res.status(200).json(item);
@@ -283,24 +283,24 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
       const ticket = item.ticket;
       const basePrice = ticket.price;
 
-      const currentPrice = computeDynamicPrice({
-        basePrice,
-        clubOpenDays: ticket.club.openDays,
-        openHours: ticket.club.openHours,
-        availableDate: new Date(`${item.date}T00:00:00`),
-        useDateBasedLogic: !!ticket.eventId
-      });
+      // const currentPrice = computeDynamicPrice({
+      //   basePrice,
+      //   clubOpenDays: ticket.club.openDays,
+      //   openHours: ticket.club.openHours,
+      //   availableDate: new Date(`${item.date}T00:00:00`),
+      //   useDateBasedLogic: !!ticket.eventId
+      // });
 
-      const discountApplied = Math.max(0, Math.round((basePrice - currentPrice) * 100) / 100);
+      // const discountApplied = Math.max(0, Math.round((basePrice - currentPrice) * 100) / 100);
 
       return {
         id: item.id,
         ticketId: item.ticketId,
         quantity: item.quantity,
         date: item.date,
-        unitPrice: item.unitPrice, // stored at time of add
-        currentPrice,
-        discountApplied,
+        // unitPrice: item.unitPrice, // stored at time of add
+        // currentPrice,
+        // discountApplied,
         ticket,
       };
     });

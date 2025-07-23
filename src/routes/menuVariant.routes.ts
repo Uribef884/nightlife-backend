@@ -6,6 +6,7 @@ import {
   deleteMenuItemVariant,
 } from "../controllers/menuVariant.controller";
 import { authMiddleware } from "../middlewares/authMiddleware";
+import { toggleMenuItemVariantDynamicPricing } from "../controllers/menuVariant.controller";
 
 const router = Router();
 
@@ -16,5 +17,6 @@ router.get("/:menuItemId", getVariantsByMenuItemId);
 router.post("/", authMiddleware, createMenuItemVariant);
 router.patch("/:id", authMiddleware, updateMenuItemVariant);
 router.delete("/:id", authMiddleware, deleteMenuItemVariant);
+router.patch('/:id/toggle-dynamic-pricing', authMiddleware, toggleMenuItemVariantDynamicPricing);
 
 export default router;

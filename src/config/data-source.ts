@@ -13,6 +13,7 @@ import { MenuItemVariant } from "../entities/MenuItemVariant";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { MenuPurchase } from "../entities/MenuPurchase";
 import { MenuPurchaseTransaction } from "../entities/MenuPurchaseTransaction";
+import { Ad } from "../entities/Ad";
 
 dotenv.config();
 
@@ -32,11 +33,12 @@ export const AppDataSource = new DataSource({
     User, 
     CartItem, 
     PurchaseTransaction, 
-    Event, 
+    Event,
+    Ad,
     MenuCategory, 
     MenuItem, 
     MenuItemVariant, 
     MenuCartItem, 
     MenuPurchase, 
-    MenuPurchaseTransaction],
+    MenuPurchaseTransaction,],
 });

@@ -6,6 +6,7 @@ import { AppDataSource } from '../config/data-source';
 import { Club } from '../entities/Club';
 import { MenuItem } from '../entities/MenuItem';
 import { Event } from '../entities/Event';
+import { Ad } from "../entities/Ad";
 
 // Upload menu PDF
 export const uploadMenuPdf = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -125,12 +126,8 @@ export const removePdfMenu = async (req: AuthenticatedRequest, res: Response): P
       const url = new URL(club.pdfMenuUrl);
       const key = url.pathname.substring(1); // Remove leading slash
       
-      console.log(`🔍 Parsed URL pathname: ${url.pathname}`);
-      console.log(`🗑️ Attempting to delete S3 key: ${key}`);
-      
       // Delete from S3
       await S3Service.deleteFile(key);
-      console.log(`✅ Successfully deleted S3 key: ${key}`);
     } catch (s3Error) {
       console.error('Error deleting file from S3:', s3Error);
       // Continue with database cleanup even if S3 deletion fails
@@ -360,6 +357,67 @@ export const uploadEventBanner = async (req: AuthenticatedRequest, res: Response
   } catch (error) {
     console.error('❌ Error uploading event banner:', error);
     res.status(500).json({ error: 'Failed to upload event banner' });
+  }
+};
+
+// Upload ad image (admin or club ad)
+export const uploadAdImage = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user!;
+    const { adId } = req.params;
+    const file = req.file;
+    if (!file) {
+      res.status(400).json({ error: "No image file uploaded." });
+      return ;
+    }
+
+    // Find the ad
+    const adRepo = AppDataSource.getRepository(Ad);
+    const ad = await adRepo.findOne({ where: { id: adId } });
+    if (!ad) {
+      res.status(404).json({ error: "Ad not found." });
+      return;
+    }
+
+    // Permission check
+    if (!ad.clubId && user.role !== "admin") {
+      res.status(403).json({ error: "Only admins can upload images for admin ads." });
+      return ;
+    }
+    if (ad.clubId && (user.role !== "clubowner" || user.clubId !== ad.clubId)) {
+      res.status(403).json({ error: "Only the club owner can upload images for this ad." });
+      return;
+    }
+
+    // Store old image URL for safe deletion
+    const oldImageUrl = ad.imageUrl;
+
+    // Process image and generate blurhash
+    const processed = await ImageService.processImage(file.buffer);
+    const key = S3Service.generateAdKey(ad);
+    const uploadResult = await S3Service.uploadFile(
+      processed.buffer,
+      'image/jpeg',
+      key
+    );
+
+    // Update ad with new image
+    ad.imageUrl = uploadResult.url;
+    ad.imageBlurhash = processed.blurhash;
+    await adRepo.save(ad);
+
+    // Safe deletion of old image
+    await S3Service.deleteFileByUrl(oldImageUrl, ad.imageUrl);
+
+    res.json({
+      message: 'Ad image uploaded successfully',
+      imageUrl: ad.imageUrl,
+      blurhash: ad.imageBlurhash,
+      adId: ad.id
+    });
+  } catch (error) {
+    console.error('Error uploading ad image:', error);
+    res.status(500).json({ error: 'Failed to upload ad image' });
   }
 };
 

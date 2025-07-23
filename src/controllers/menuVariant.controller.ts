@@ -159,3 +159,28 @@ export const deleteMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
     res.status(500).json({ error: "Server error deleting variant" });
   }
 };
+
+// PATCH /menu/variants/:id/toggle-dynamic-pricing — toggle dynamicPricingEnabled for variants
+export const toggleMenuItemVariantDynamicPricing = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    const { id } = req.params;
+    
+    if (!user || user.role !== "clubowner") {
+      res.status(403).json({ error: "Only club owners can modify menu item variants" });
+      return;
+    }
+    const repo = AppDataSource.getRepository(MenuItemVariant);
+    const variant = await repo.findOne({ where: { id }, relations: ["menuItem"] });
+    if (!variant || !variant.menuItem || variant.menuItem.clubId !== user.clubId) {
+      res.status(403).json({ error: "Variant not found or not owned by your club" });
+      return;
+    }
+    variant.dynamicPricingEnabled = !variant.dynamicPricingEnabled;
+    await repo.save(variant);
+    res.json({ message: "Menu item variant dynamic pricing toggled", dynamicPricingEnabled: variant.dynamicPricingEnabled });
+  } catch (err) {
+    console.error("Error toggling menu item variant dynamic pricing:", err);
+    res.status(500).json({ error: "Server error toggling dynamic pricing" });
+  }
+};

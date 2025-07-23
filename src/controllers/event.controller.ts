@@ -74,17 +74,23 @@ export const getMyClubEvents = async (req: AuthenticatedRequest, res: Response):
 
 // POST /events — clubOwner only
 export const createEvent = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-try {
-    const { name, description, availableDate, bannerUrl, BannerURLBlurHash } = req.body;
+  try {
+    const { name, description, availableDate } = req.body;
     const user = req.user;
 
     if (!user || !user.clubId) {
-     res.status(403).json({ error: "Forbidden: No clubId associated" });
-     return; 
+      res.status(403).json({ error: "Forbidden: No clubId associated" });
+      return;
     }
 
     if (!name || !availableDate) {
       res.status(400).json({ error: "Missing required fields: name or availableDate" });
+      return;
+    }
+
+    // Validate image
+    if (!req.file) {
+      res.status(400).json({ error: "Image file is required." });
       return;
     }
 
@@ -107,23 +113,34 @@ try {
       return;
     }
 
+    // Process image
+    const processed = await (await import("../services/imageService")).ImageService.processImage(req.file.buffer);
+
     const eventRepo = AppDataSource.getRepository(Event);
     const newEvent = eventRepo.create({
       name: name.trim(),
       description: description?.trim() || null,
       availableDate: normalizedDate,
-      bannerUrl: bannerUrl?.trim() || null,
-      BannerURLBlurHash,
+      bannerUrl: "", // will be set after upload
+      BannerURLBlurHash: processed.blurhash,
       clubId: user.clubId,
     });
 
     await eventRepo.save(newEvent);
+
+    // Upload image to S3
+    const { S3Service } = await import("../services/s3Service");
+    const key = S3Service.generateKey(user.clubId, 'event-banner');
+    const uploadResult = await S3Service.uploadFile(processed.buffer, 'image/jpeg', key);
+    
+    // Update event with banner URL
+    newEvent.bannerUrl = uploadResult.url;
+    await eventRepo.save(newEvent);
+
     res.status(201).json(newEvent);
-    return;
   } catch (err) {
     console.error("❌ Failed to create event:", err);
     res.status(500).json({ error: "Internal server error" });
-    return;
   }
 };
 
@@ -198,6 +215,152 @@ export const deleteEvent = async (req: AuthenticatedRequest, res: Response) => {
     res.status(200).json({ message: "Event and associated tickets deleted successfully" });
   } catch (err) {
     console.error("❌ Failed to delete event:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// PUT /events/:id — update name and description
+export const updateEvent = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { name, description, availableDate } = req.body;
+    const user = req.user;
+
+    if (!user || !user.clubId) {
+      res.status(403).json({ error: "Forbidden: No clubId associated" });
+      return;
+    }
+
+    // Prevent changing availableDate
+    if (availableDate !== undefined) {
+      res.status(400).json({ error: "Cannot update availableDate after creation" });
+      return;
+    }
+
+    const eventRepo = AppDataSource.getRepository(Event);
+    const event = await eventRepo.findOne({ where: { id } });
+
+    if (!event) {
+      res.status(404).json({ error: "Event not found" });
+      return;
+    }
+
+    if (event.clubId !== user.clubId) {
+      res.status(403).json({ error: "Forbidden: You cannot update events from another club" });
+      return;
+    }
+
+    // Update fields
+    if (name !== undefined) {
+      event.name = name.trim();
+    }
+    if (description !== undefined) {
+      event.description = description?.trim() || null;
+    }
+
+    await eventRepo.save(event);
+    res.json(event);
+  } catch (err) {
+    console.error("❌ Failed to update event:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// PUT /events/:id/image — update event image
+export const updateEventImage = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+
+    if (!user || !user.clubId) {
+      res.status(403).json({ error: "Forbidden: No clubId associated" });
+      return;
+    }
+
+    if (!req.file) {
+      res.status(400).json({ error: "Image file is required." });
+      return;
+    }
+
+    const eventRepo = AppDataSource.getRepository(Event);
+    const event = await eventRepo.findOne({ where: { id } });
+
+    if (!event) {
+      res.status(404).json({ error: "Event not found" });
+      return;
+    }
+
+    if (event.clubId !== user.clubId) {
+      res.status(403).json({ error: "Forbidden: You cannot update events from another club" });
+      return;
+    }
+
+    // Process new image
+    const processed = await (await import("../services/imageService")).ImageService.processImage(req.file.buffer);
+
+    // Store reference to old image for deletion
+    const oldBannerUrl = event.bannerUrl;
+
+    // Generate new S3 key with unique identifier
+    const { S3Service } = await import("../services/s3Service");
+    const key = S3Service.generateKey(user.clubId, 'event-banner', `${event.id}-${Date.now()}`);
+
+    // Upload new image
+    const uploadResult = await S3Service.uploadFile(processed.buffer, 'image/jpeg', key);
+
+    // Update event
+    event.bannerUrl = uploadResult.url;
+    event.BannerURLBlurHash = processed.blurhash;
+    await eventRepo.save(event);
+
+    // Delete old image from S3 if it exists and is different
+    if (oldBannerUrl && oldBannerUrl !== uploadResult.url) {
+      try {
+        const url = new URL(oldBannerUrl);
+        const oldKey = url.pathname.substring(1);
+        await S3Service.deleteFile(oldKey);
+      } catch (deleteError) {
+        console.error('⚠️ Warning: Failed to delete old event banner from S3:', deleteError);
+        // Don't fail the request - new image is already uploaded
+      }
+    }
+
+    res.json(event);
+  } catch (err) {
+    console.error("❌ Failed to update event image:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// PUT /events/:id/toggle-visibility — toggle event visibility
+export const toggleEventVisibility = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { id } = req.params;
+    const eventRepo = AppDataSource.getRepository(Event);
+    const event = await eventRepo.findOne({ where: { id } });
+
+    if (!event) {
+      res.status(404).json({ error: "Event not found" });
+      return;
+    }
+
+    if (event.clubId !== user.clubId) {
+      res.status(403).json({ error: "You are not authorized to modify this event" });
+      return;
+    }
+
+    event.isActive = !event.isActive;
+    await eventRepo.save(event);
+
+    res.json({ message: "Event visibility toggled", isActive: event.isActive });
+  } catch (err) {
+    console.error("❌ Failed to toggle event visibility:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };

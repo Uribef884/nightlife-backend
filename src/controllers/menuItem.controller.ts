@@ -376,3 +376,32 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
     res.status(500).json({ error: "Failed to load public menu" });
   }
 };
+
+// PATCH /menu/items/:id/toggle-dynamic-pricing — toggle dynamicPricingEnabled
+export const toggleMenuItemDynamicPricing = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    const { id } = req.params;
+    if (!user || user.role !== "clubowner") {
+      res.status(403).json({ error: "Only club owners can modify menu items" });
+      return;
+    }
+    const repo = AppDataSource.getRepository(MenuItem);
+    const item = await repo.findOne({ where: { id } });
+    if (!item || item.clubId !== user.clubId) {
+      res.status(403).json({ error: "Item not found or not owned by your club" });
+      return;
+    }
+    if (item.hasVariants) {
+      res.status(400).json({ error: "Cannot toggle dynamic pricing on menu items with variants. Use the variant toggle instead." });
+      return;
+    }
+    item.dynamicPricingEnabled = !item.dynamicPricingEnabled;
+    await repo.save(item);
+    res.json({ message: "Menu item dynamic pricing toggled", dynamicPricingEnabled: item.dynamicPricingEnabled });
+  } catch (err) {
+    console.error("Error toggling menu item dynamic pricing:", err);
+    res.status(500).json({ error: "Server error toggling dynamic pricing" });
+  }
+};
+

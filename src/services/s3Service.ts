@@ -1,6 +1,8 @@
 import AWS from 'aws-sdk';
 import { v4 as uuidv4 } from 'uuid';
 
+import { Ad } from "../entities/Ad";
+
 const s3 = new AWS.S3({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -66,6 +68,35 @@ export class S3Service {
         return `clubs/${clubId}/ads/${uuid}.jpg`;
       default:
         return `misc/${uuid}`;
+    }
+  }
+
+  /**
+   * Generate the S3 key for an ad image (admin or club ad)
+   */
+  static generateAdKey(ad: { id: string; clubId?: string | null }): string {
+    if (!ad.clubId) {
+      // Admin ad
+      return `admin/ads/${ad.id}.jpg`;
+    } else {
+      // Club ad
+      return `clubs/${ad.clubId}/ads/${ad.id}.jpg`;
+    }
+  }
+
+  /**
+   * Delete a file from S3 by its URL (safe for ad image updates)
+   * Only deletes if the URL is not null/empty and not the same as the new URL
+   */
+  static async deleteFileByUrl(url?: string | null, newUrl?: string | null): Promise<void> {
+    if (!url || !url.startsWith("http")) return;
+    if (newUrl && url === newUrl) return; // Don't delete if it's the same file (overwritten)
+    try {
+      const parsed = new URL(url);
+      const key = parsed.pathname.startsWith("/") ? parsed.pathname.slice(1) : parsed.pathname;
+      await this.deleteFile(key);
+    } catch (err) {
+      console.error("Failed to delete S3 file by URL:", url, err);
     }
   }
 } 

@@ -34,6 +34,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       quantity,
       category,
       eventId, // ✅ clubId removed from destructuring
+      dynamicPricingEnabled, // <-- add this to destructuring
     } = req.body;
 
     if (!name || price == null || maxPerPerson == null || priority == null || !category) {
@@ -97,6 +98,13 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       }
     }
 
+    let dynamicPricing = false;
+    if (category === TicketCategory.FREE || price == 0) {
+      dynamicPricing = false;
+    } else {
+      dynamicPricing = !!dynamicPricingEnabled;
+    }
+
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const ticket = ticketRepo.create({
       name,
@@ -111,6 +119,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       category,
       club, // ✅ set by lookup, not user input
       ...(event ? { event } : {}),
+      dynamicPricingEnabled: dynamicPricing,
     });
 
     const saved = await ticketRepo.save(ticket);
@@ -465,6 +474,52 @@ export const toggleTicketVisibility = async (req: Request, res: Response): Promi
     res.json({ message: "Ticket visibility toggled", isActive: ticket.isActive });
   } catch (error) {
     console.error("❌ Error toggling ticket visibility:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// PATCH /tickets/:id/toggle-dynamic-pricing — toggle dynamicPricingEnabled
+export const toggleTicketDynamicPricing = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const { id } = req.params;
+    const repo = AppDataSource.getRepository(Ticket);
+    const ticket = await repo.findOne({ where: { id }, relations: ["club", "club.owner"] });
+
+    if (!ticket) {
+      res.status(404).json({ error: "Ticket not found" });
+      return;
+    }
+
+    if (user.role === "clubowner" && ticket.club.ownerId !== user.id) {
+      res.status(403).json({ error: "You are not authorized to modify this ticket" });
+      return;
+    }
+
+    // Prevent enabling dynamic pricing for free tickets
+    if ((ticket.category === TicketCategory.FREE || ticket.price === 0) && !ticket.dynamicPricingEnabled) {
+      res.status(400).json({ error: "Dynamic pricing cannot be enabled for free tickets." });
+      return;
+    }
+    if ((ticket.category === TicketCategory.FREE || ticket.price === 0) && ticket.dynamicPricingEnabled) {
+      // Allow disabling if currently enabled (shouldn't happen, but for safety)
+      ticket.dynamicPricingEnabled = false;
+      await repo.save(ticket);
+      res.json({ message: "Ticket dynamic pricing toggled", dynamicPricingEnabled: ticket.dynamicPricingEnabled });
+      return;
+    }
+
+    ticket.dynamicPricingEnabled = !ticket.dynamicPricingEnabled;
+    await repo.save(ticket);
+
+    res.json({ message: "Ticket dynamic pricing toggled", dynamicPricingEnabled: ticket.dynamicPricingEnabled });
+  } catch (error) {
+    console.error("❌ Error toggling ticket dynamic pricing:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };

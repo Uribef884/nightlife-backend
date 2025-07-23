@@ -25,6 +25,7 @@ import menuQRRoutes from "./routes/menuQR.routes";
 import ticketQRRoutes from "./routes/ticketQR.routes";
 import menuConfigRoutes from "./routes/menuConfig.routes";
 import fileUploadRoutes from "./routes/fileUpload.routes";
+import adRoutes from "./routes/ads.routes";
 
 dotenv.config();
 
@@ -64,6 +65,7 @@ app.use("/cart", cartRoutes);
 app.use("/checkout", checkoutRoutes);
 app.use("/purchases", purchaseRoutes);
 app.use("/events", eventRoutes);
+app.use("/ads", adRoutes);
 
 // Menu System
 app.use("/menu/categories", menuCategoryRoutes);

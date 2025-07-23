@@ -18,9 +18,9 @@ export class ImageService {
   ): Promise<ProcessedImage> {
     // Resize main image
     const sharpImage = sharp(inputBuffer).resize(maxWidth, maxHeight, {
-      fit: 'inside',
-      withoutEnlargement: true,
-    });
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
 
     const metadata = await sharpImage.metadata();
     const width = metadata.width!;

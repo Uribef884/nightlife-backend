@@ -3,7 +3,7 @@ import { AppDataSource } from "../config/data-source";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { MenuItem } from "../entities/MenuItem";
 import { Club } from "../entities/Club";
-import { computeDynamicPrice } from "../utils/dynamicPricing";
+// import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { AuthenticatedRequest } from "../types/express";
 import { CartItem } from "../entities/TicketCartItem";
 
@@ -86,18 +86,18 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
       ? menuItem.variants.find(v => v.id === variantId)?.price ?? 0
       : menuItem.price!;
 
-    const unitPrice = menuItem.dynamicPricingEnabled
-      ? computeDynamicPrice({
-          basePrice,
-          clubOpenDays: menuItem.club.openDays,
-          openHours: menuItem.club.openHours
-        })
-      : basePrice;
+    // const unitPrice = menuItem.dynamicPricingEnabled
+    //   ? computeDynamicPrice({
+    //       basePrice,
+    //       clubOpenDays: menuItem.club.openDays,
+    //       openHours: menuItem.club.openHours
+    //     })
+    //   : basePrice;
 
-    if (unitPrice <= 0) {
-      res.status(400).json({ error: "Invalid price configuration for this item or variant." });
-      return;
-    }
+    // if (unitPrice <= 0) {
+    //   res.status(400).json({ error: "Invalid price configuration for this item or variant." });
+    //   return;
+    // }
 
     const where = userId
       ? { menuItemId, variantId: variantId ?? undefined, userId }
@@ -116,7 +116,7 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
 
     if (existing) {
       existing.quantity = newTotal;
-      existing.unitPrice = unitPrice;
+      // existing.unitPrice = unitPrice;
       await cartRepo.save(existing);
       res.json(existing);
       return;
@@ -128,7 +128,7 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
     newItem.userId = userId ?? null;
     newItem.sessionId = sessionId ?? null;
     newItem.quantity = quantity;
-    newItem.unitPrice = unitPrice;
+    // newItem.unitPrice = unitPrice;
     newItem.clubId = menuItem.clubId;
 
     await cartRepo.save(newItem);
@@ -208,18 +208,18 @@ export const getUserMenuCart = async (req: AuthenticatedRequest, res: Response):
         ? variant?.price ?? 0
         : menuItem.price!;
 
-      const currentPrice = computeDynamicPrice({
-        basePrice,
-        clubOpenDays: menuItem.club.openDays,
-        openHours: menuItem.club.openHours,
-      });
+      // const currentPrice = computeDynamicPrice({
+      //   basePrice: menuItem.price,
+      //   clubOpenDays: club.openDays,
+      //   openHours: club.openHours,
+      // });
 
-      const discountApplied = Math.max(0, Math.round((basePrice - currentPrice) * 100) / 100);
+      // const discountApplied = Math.max(0, Math.round((basePrice - currentPrice) * 100) / 100);
 
       return {
         ...item,
-        currentPrice,
-        discountApplied
+        // currentPrice,
+        // discountApplied
       };
     });
 

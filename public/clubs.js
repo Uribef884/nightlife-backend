@@ -385,7 +385,7 @@ function renderClubDetail(club, tickets, menu, events) {
             const itemCanvasId = `menu-item-blurhash-${item.id}`;
             const itemImageId = `menu-item-image-${item.id}`;
             return `
-              <li class="menu-item">
+            <li class="menu-item">
                 ${item.imageUrl ? `
                   <div class="menu-item-with-image">
                     <div class="menu-item-image-container">
@@ -393,22 +393,22 @@ function renderClubDetail(club, tickets, menu, events) {
                       <img id="${itemImageId}" class="menu-item-image loading" alt="${item.name}" style="display: none;" />
                     </div>
                     <div class="menu-item-content">
-                      <span class="menu-id">ID: ${item.id || 'N/A'}</span>
-                      <div><b>${item.name}</b> - $${item.price ?? ''}</div>
-                      <div>${item.description || ''}</div>
-                      ${item.variants && item.variants.length ? `
-                        <div style="margin-top:6px;">
-                          <b>Variants:</b>
-                          <ul style="margin:0;padding-left:18px;">
-                            ${item.variants.map(variant => `
-                              <li class="variant-item">
-                                <span class="variant-id">ID: ${variant.id || 'N/A'}</span>
-                                <div><b>${variant.name}</b> - $${variant.price}</div>
-                              </li>
-                            `).join('')}
-                          </ul>
-                        </div>
-                      ` : ''}
+              <span class="menu-id">ID: ${item.id || 'N/A'}</span>
+              <div><b>${item.name}</b> - $${item.price ?? ''}</div>
+              <div>${item.description || ''}</div>
+              ${item.variants && item.variants.length ? `
+                <div style="margin-top:6px;">
+                  <b>Variants:</b>
+                  <ul style="margin:0;padding-left:18px;">
+                    ${item.variants.map(variant => `
+                      <li class="variant-item">
+                        <span class="variant-id">ID: ${variant.id || 'N/A'}</span>
+                        <div><b>${variant.name}</b> - $${variant.price}</div>
+                      </li>
+                    `).join('')}
+                  </ul>
+                </div>
+              ` : ''}
                     </div>
                   </div>
                 ` : `
@@ -423,8 +423,8 @@ function renderClubDetail(club, tickets, menu, events) {
                           <li class="variant-item">
                             <span class="variant-id">ID: ${variant.id || 'N/A'}</span>
                             <div><b>${variant.name}</b> - $${variant.price}</div>
-                          </li>
-                        `).join('')}
+            </li>
+          `).join('')}
                       </ul>
                     </div>
                   ` : ''}

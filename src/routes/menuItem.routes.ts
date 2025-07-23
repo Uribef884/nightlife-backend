@@ -7,7 +7,8 @@ import {
   getMenuItemById,
   getItemsForMyClub,
   getMenuForClub,
-  getPublicMenuForClub
+  getPublicMenuForClub,
+  toggleMenuItemDynamicPricing
 } from "../controllers/menuItem.controller";
 import { authMiddleware, requireClubOwnerOrAdmin } from "../middlewares/authMiddleware";
 
@@ -24,5 +25,6 @@ router.get("/my/items", authMiddleware, requireClubOwnerOrAdmin, getItemsForMyCl
 router.post("/", authMiddleware, requireClubOwnerOrAdmin, createMenuItem);
 router.patch("/:id", authMiddleware, requireClubOwnerOrAdmin, updateMenuItem);
 router.delete("/:id", authMiddleware, requireClubOwnerOrAdmin, deleteMenuItem);
+router.patch('/:id/toggle-dynamic-pricing', authMiddleware, toggleMenuItemDynamicPricing);
 
 export default router;

@@ -42,9 +42,47 @@ export async function createClub(req: AuthenticatedRequest, res: Response): Prom
     return;
   }
 
+  // --- VALIDATION FOR openDays and openHours ---
+  if (!Array.isArray(openDays) || openDays.length === 0) {
+    res.status(400).json({ error: "openDays must be a non-empty array of days" });
+    return;
+  }
+  if (!Array.isArray(openHours)) {
+    res.status(400).json({ error: "openHours must be an array of { day, open, close } objects" });
+    return;
+  }
+  const openDaysSet = new Set(openDays);
+  const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+  for (const entry of openHours) {
+    if (!entry.day || !openDaysSet.has(entry.day)) {
+      res.status(400).json({ error: `Open hour day '${entry.day}' is not in openDays` });
+      return;
+    }
+    if (!timeRegex.test(entry.open) || !timeRegex.test(entry.close)) {
+      res.status(400).json({ error: `Invalid time format for day '${entry.day}'. Use 24-hour HH:MM format.` });
+      return;
+    }
+  }
+  // Check that every day in openDays has a corresponding entry in openHours
+  const openHoursDays = new Set(openHours.map(h => h.day));
+  for (const day of openDays) {
+    if (!openHoursDays.has(day)) {
+      res.status(400).json({ error: `Day '${day}' in openDays has no corresponding entry in openHours` });
+      return;
+    }
+  }
+  // --- END VALIDATION ---
+
   const owner = await userRepo.findOneBy({ id: ownerId });
   if (!owner) {
     res.status(404).json({ error: "User with provided ownerId not found" });
+    return;
+  }
+
+  // Check if the user is already an owner of another club
+  const existingClub = await repo.findOne({ where: { ownerId } });
+  if (existingClub) {
+    res.status(400).json({ error: "User is already an owner of another club" });
     return;
   }
 
@@ -81,12 +119,18 @@ export async function createClub(req: AuthenticatedRequest, res: Response): Prom
   res.status(201).json(club);
 }
 
-// UPDATE CLUB
+// UPDATE CLUB (ADMIN ONLY)
 export async function updateClub(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const repo = AppDataSource.getRepository(Club);
     const { id } = req.params;
     const user = req.user;
+
+    // Admin only
+    if (!user || user.role !== "admin") {
+      res.status(403).json({ error: "Forbidden: Only admins can update clubs" });
+      return;
+    }
 
     const club = await repo.findOne({ where: { id }, relations: ["owner"] });
     if (!club) {
@@ -94,12 +138,44 @@ export async function updateClub(req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
-    if (user?.role === "clubowner" && club.ownerId !== user.id) {
-      res.status(403).json({ error: "You do not own this club" });
-      return;
+    // --- VALIDATION FOR openDays and openHours (if present in update) ---
+    const { openDays, openHours } = req.body;
+    if (openDays !== undefined) {
+      if (!Array.isArray(openDays) || openDays.length === 0) {
+        res.status(400).json({ error: "openDays must be a non-empty array of days" });
+        return;
+      }
     }
+    if (openHours !== undefined) {
+      if (!Array.isArray(openHours)) {
+        res.status(400).json({ error: "openHours must be an array of { day, open, close } objects" });
+        return;
+      }
+      const daysSet = new Set(openDays !== undefined ? openDays : club.openDays);
+      const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+      for (const entry of openHours) {
+        if (!entry.day || !daysSet.has(entry.day)) {
+          res.status(400).json({ error: `Open hour day '${entry.day}' is not in openDays` });
+          return;
+        }
+        if (!timeRegex.test(entry.open) || !timeRegex.test(entry.close)) {
+          res.status(400).json({ error: `Invalid time format for day '${entry.day}'. Use 24-hour HH:MM format.` });
+          return;
+        }
+      }
+      // Check that every day in openDays has a corresponding entry in openHours
+      const openHoursDays = new Set(openHours.map(h => h.day));
+      const daysToCheck = openDays !== undefined ? openDays : club.openDays;
+      for (const day of daysToCheck) {
+        if (!openHoursDays.has(day)) {
+          res.status(400).json({ error: `Day '${day}' in openDays has no corresponding entry in openHours` });
+          return;
+        }
+      }
+    }
+    // --- END VALIDATION ---
 
-    const { ownerId, priority, ...allowedUpdates } = req.body;
+    const { priority, ...allowedUpdates } = req.body;
 
     if (priority && priority < 1) {
       allowedUpdates.priority = 1;
@@ -112,6 +188,90 @@ export async function updateClub(req: AuthenticatedRequest, res: Response): Prom
     res.json(updated);
   } catch (error) {
     console.error("❌ Error updating club:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+// UPDATE MY CLUB (CLUB OWNER ONLY)
+export async function updateMyClub(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const repo = AppDataSource.getRepository(Club);
+    const user = req.user;
+
+    // Club owner only
+    if (!user || user.role !== "clubowner") {
+      res.status(403).json({ error: "Forbidden: Only club owners can update their clubs" });
+      return;
+    }
+
+    if (!user.clubId) {
+      res.status(400).json({ error: "No club associated with this user" });
+      return;
+    }
+
+    const club = await repo.findOne({ where: { id: user.clubId }, relations: ["owner"] });
+    if (!club) {
+      res.status(404).json({ error: "Club not found" });
+      return;
+    }
+
+    // --- VALIDATION FOR openDays and openHours (if present in update) ---
+    const { openDays, openHours, ownerId, ...allowedUpdates } = req.body;
+    
+    // Prevent club owners from updating ownerId
+    if (ownerId !== undefined) {
+      res.status(403).json({ error: "Club owners cannot update the ownerId field" });
+      return;
+    }
+
+    if (openDays !== undefined) {
+      if (!Array.isArray(openDays) || openDays.length === 0) {
+        res.status(400).json({ error: "openDays must be a non-empty array of days" });
+        return;
+      }
+    }
+    if (openHours !== undefined) {
+      if (!Array.isArray(openHours)) {
+        res.status(400).json({ error: "openHours must be an array of { day, open, close } objects" });
+        return;
+      }
+      const daysSet = new Set(openDays !== undefined ? openDays : club.openDays);
+      const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+      for (const entry of openHours) {
+        if (!entry.day || !daysSet.has(entry.day)) {
+          res.status(400).json({ error: `Open hour day '${entry.day}' is not in openDays` });
+          return;
+        }
+        if (!timeRegex.test(entry.open) || !timeRegex.test(entry.close)) {
+          res.status(400).json({ error: `Invalid time format for day '${entry.day}'. Use 24-hour HH:MM format.` });
+          return;
+        }
+      }
+      // Check that every day in openDays has a corresponding entry in openHours
+      const openHoursDays = new Set(openHours.map(h => h.day));
+      const daysToCheck = openDays !== undefined ? openDays : club.openDays;
+      for (const day of daysToCheck) {
+        if (!openHoursDays.has(day)) {
+          res.status(400).json({ error: `Day '${day}' in openDays has no corresponding entry in openHours` });
+          return;
+        }
+      }
+    }
+    // --- END VALIDATION ---
+
+    const { priority, ...updateData } = allowedUpdates;
+
+    if (priority && priority < 1) {
+      updateData.priority = 1;
+    } else if (priority) {
+      updateData.priority = priority;
+    }
+
+    repo.merge(club, updateData);
+    const updated = await repo.save(club);
+    res.json(updated);
+  } catch (error) {
+    console.error("❌ Error updating my club:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 }
