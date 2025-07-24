@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { MenuItemVariant } from "../entities/MenuItemVariant";
 import { MenuItem } from "../entities/MenuItem";
+import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
+import { MenuPurchase } from "../entities/MenuPurchase";
 import { sanitizeInput } from "../utils/sanitizeInput";
 import { AuthenticatedRequest } from "../types/express";
 
@@ -10,7 +12,7 @@ export const getVariantsByMenuItemId = async (req: Request, res: Response): Prom
     const { menuItemId } = req.params;
     const variantRepo = AppDataSource.getRepository(MenuItemVariant);
     const variants = await variantRepo.find({
-      where: { menuItemId, isActive: true },
+      where: { menuItemId, isActive: true, isDeleted: false },
       order: { name: "ASC" },
     });
     res.json(variants);
@@ -80,7 +82,9 @@ export const updateMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
     const variantRepo = AppDataSource.getRepository(MenuItemVariant);
     const itemRepo = AppDataSource.getRepository(MenuItem);
 
-    const variant = await variantRepo.findOneBy({ id });
+    const variant = await variantRepo.findOne({ 
+      where: { id, isDeleted: false } 
+    });
     if (!variant) {
       res.status(404).json({ error: "Variant not found" });
       return;
@@ -139,21 +143,57 @@ export const deleteMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
 
     const variantRepo = AppDataSource.getRepository(MenuItemVariant);
     const itemRepo = AppDataSource.getRepository(MenuItem);
+    const ticketIncludedMenuItemRepo = AppDataSource.getRepository(TicketIncludedMenuItem);
+    const menuPurchaseRepo = AppDataSource.getRepository(MenuPurchase);
 
-    const variant = await variantRepo.findOneBy({ id });
+    const variant = await variantRepo.findOne({ 
+      where: { id, isDeleted: false } 
+    });
     if (!variant) {
       res.status(404).json({ error: "Variant not found" });
       return;
     }
 
-    const item = await itemRepo.findOneBy({ id: variant.menuItemId });
+    const item = await itemRepo.findOne({ 
+      where: { id: variant.menuItemId, isDeleted: false } 
+    });
     if (!item || item.clubId !== user.clubId) {
       res.status(403).json({ error: "Unauthorized to delete this variant" });
       return;
     }
 
-    await variantRepo.remove(variant);
-    res.json({ message: "Variant deleted successfully" });
+    // Check if variant is included in any active ticket bundles
+    const includedInTickets = await ticketIncludedMenuItemRepo.count({
+      where: { variantId: id }
+    });
+
+    // Check if variant has any existing purchases
+    const existingPurchases = await menuPurchaseRepo.count({
+      where: { variantId: id }
+    });
+
+    if (includedInTickets > 0 || existingPurchases > 0) {
+      // Soft delete - mark as deleted but keep the record
+      variant.isDeleted = true;
+      variant.deletedAt = new Date();
+      variant.isActive = false; // Also deactivate to prevent new usage
+      await variantRepo.save(variant);
+
+      res.json({ 
+        message: "Variant soft deleted successfully", 
+        deletedAt: variant.deletedAt,
+        includedInTickets,
+        existingPurchases,
+        note: "Variant marked as deleted but preserved due to existing purchases or ticket bundles"
+      });
+    } else {
+      // Hard delete - no associated ticket bundles, safe to completely remove
+      await variantRepo.remove(variant);
+      res.json({ 
+        message: "Variant permanently deleted successfully",
+        note: "No associated ticket bundles found, variant completely removed"
+      });
+    }
   } catch (err) {
     console.error("Error deleting variant:", err);
     res.status(500).json({ error: "Server error deleting variant" });
@@ -171,7 +211,10 @@ export const toggleMenuItemVariantDynamicPricing = async (req: AuthenticatedRequ
       return;
     }
     const repo = AppDataSource.getRepository(MenuItemVariant);
-    const variant = await repo.findOne({ where: { id }, relations: ["menuItem"] });
+    const variant = await repo.findOne({ 
+      where: { id, isDeleted: false }, 
+      relations: ["menuItem"] 
+    });
     if (!variant || !variant.menuItem || variant.menuItem.clubId !== user.clubId) {
       res.status(403).json({ error: "Variant not found or not owned by your club" });
       return;

@@ -10,9 +10,10 @@ if (!rawKey || rawKey.length !== 32) {
 const key = Buffer.from(rawKey, "utf-8");
 
 export type QRPayload = {
-  type: "ticket" | "menu";
-  id: string;
+  type: "ticket" | "menu" | "menu_from_ticket";
+  id?: string;
   clubId: string;
+  ticketPurchaseId?: string;
   [key: string]: any;
 };
 

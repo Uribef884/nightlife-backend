@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { generateTicketEmailHTML } from "../templates/ticketEmailTemplate";
 import { generateMenuEmailHTML } from "../templates/menuEmailTemplate";
+import { generateMenuFromTicketEmailHTML } from "../templates/menuFromTicketEmailTemplate";
 
 type TicketEmailPayload = {
   to: string;
@@ -23,6 +24,22 @@ type MenuEmailPayload = {
     unitPrice: number;
   }>;
   total: number;
+};
+
+type MenuFromTicketEmailPayload = {
+  to: string;
+  email: string;
+  ticketName: string;
+  date: string;
+  qrImageDataUrl: string;
+  clubName: string;
+  items: Array<{
+    name: string;
+    variant: string | null;
+    quantity: number;
+  }>;
+  index?: number;
+  total?: number;
 };
 
 const transporter = nodemailer.createTransport({
@@ -76,6 +93,17 @@ export async function sendPasswordResetEmail(email: string, token: string): Prom
     from: `"NightLife Support" <${process.env.SMTP_USER}>`,
     to: email,
     subject: "Reset Your NightLife Password",
+    html,
+  });
+}
+
+export async function sendMenuFromTicketEmail(payload: MenuFromTicketEmailPayload) {
+  const html = generateMenuFromTicketEmailHTML(payload);
+
+  await transporter.sendMail({
+    from: `"NightLife Menu" <${process.env.SMTP_USER}>`,
+    to: payload.to,
+    subject: `🍹 Your Included Menu Items for ${payload.ticketName}`,
     html,
   });
 }

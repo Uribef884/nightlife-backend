@@ -58,6 +58,12 @@ export class TicketPurchase {
   @Column({ type: "timestamp", nullable: true })
   usedAt?: Date;
 
+  @Column({ default: false })
+  isUsedMenu!: boolean;
+
+  @Column({ type: "timestamp", nullable: true })
+  menuQRUsedAt?: Date;
+
   @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
   userPaid!: number;
 

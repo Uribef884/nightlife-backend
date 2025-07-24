@@ -11,7 +11,7 @@ if (!rawKey || rawKey.length !== 32) {
 const key = Buffer.from(rawKey, "utf-8"); // ✅ Use utf-8, not hex
 
 type QRPayload = {
-  type: "ticket" | "menu";
+  type: "ticket" | "menu" | "menu_from_ticket";
   [key: string]: any; // ✅ allow additional fields like transactionId, email, etc.
 };
 
@@ -20,7 +20,6 @@ export async function generateEncryptedQR(data: QRPayload): Promise<string> {
   const json = JSON.stringify(data);
   const cipher = createCipheriv(algorithm, key, iv);
   const encrypted = Buffer.concat([cipher.update(json), cipher.final()]);
-  const payload = Buffer.concat([iv, encrypted]).toString("base64");
   return Buffer.concat([iv, encrypted]).toString("base64");
 }
 

@@ -6,6 +6,7 @@ import { AuthenticatedRequest } from "../types/express";
 import { Ticket } from "../entities/Ticket";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { toZonedTime, format } from "date-fns-tz";
+import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
 
 function ownsCartItem(item: CartItem, userId?: string, sessionId?: string): boolean {
   if (userId) return item.userId === userId;
@@ -279,31 +280,41 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
       order: { createdAt: "DESC" },
     });
 
-    const formatted = items.map(item => {
+    // For each cart item, if ticket.includesMenuItem, fetch included menu items
+    const formatted = await Promise.all(items.map(async item => {
       const ticket = item.ticket;
-      const basePrice = ticket.price;
-
-      // const currentPrice = computeDynamicPrice({
-      //   basePrice,
-      //   clubOpenDays: ticket.club.openDays,
-      //   openHours: ticket.club.openHours,
-      //   availableDate: new Date(`${item.date}T00:00:00`),
-      //   useDateBasedLogic: !!ticket.eventId
-      // });
-
-      // const discountApplied = Math.max(0, Math.round((basePrice - currentPrice) * 100) / 100);
-
+      let menuItems: Array<{
+        id: string;
+        menuItemId: string;
+        menuItemName: string;
+        variantId?: string;
+        variantName: string | null;
+        quantity: number;
+      }> = [];
+      if (ticket && ticket.includesMenuItem) {
+        const repo = AppDataSource.getRepository(TicketIncludedMenuItem);
+        const included = await repo.find({
+          where: { ticketId: ticket.id },
+          relations: ["menuItem", "variant"]
+        });
+        menuItems = included.map(i => ({
+          id: i.id,
+          menuItemId: i.menuItemId,
+          menuItemName: i.menuItem?.name ?? null,
+          variantId: i.variantId,
+          variantName: i.variant?.name ?? null,
+          quantity: i.quantity
+        }));
+      }
       return {
         id: item.id,
         ticketId: item.ticketId,
         quantity: item.quantity,
         date: item.date,
-        // unitPrice: item.unitPrice, // stored at time of add
-        // currentPrice,
-        // discountApplied,
         ticket,
+        menuItems // always include, even if empty
       };
-    });
+    }));
 
     res.status(200).json(formatted);
   } catch (err) {

@@ -23,6 +23,8 @@ import menuPurchaseRoutes from "./routes/menuPurchases.routes";
 import waiterRoutes from "./routes/waiter.routes";
 import menuQRRoutes from "./routes/menuQR.routes";
 import ticketQRRoutes from "./routes/ticketQR.routes";
+import menuFromTicketQRRoutes from "./routes/menuFromTicketQR.routes";
+import ticketIncludedMenuRoutes from "./routes/ticketIncludedMenu.routes";
 import menuConfigRoutes from "./routes/menuConfig.routes";
 import fileUploadRoutes from "./routes/fileUpload.routes";
 import adRoutes from "./routes/ads.routes";
@@ -82,6 +84,10 @@ app.use("/upload", fileUploadRoutes);
 // QR Validation System
 app.use("/validate/menu", menuQRRoutes);
 app.use("/validate/ticket", ticketQRRoutes);
+app.use("/validate/menu-from-ticket", menuFromTicketQRRoutes);
+
+// Ticket Menu Management
+app.use("/ticket-menu", ticketIncludedMenuRoutes);
 
 // DB Connection
 AppDataSource.initialize()

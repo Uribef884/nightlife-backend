@@ -13,6 +13,8 @@ import { MenuItemVariant } from "../entities/MenuItemVariant";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { MenuPurchase } from "../entities/MenuPurchase";
 import { MenuPurchaseTransaction } from "../entities/MenuPurchaseTransaction";
+import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
+import { MenuItemFromTicket } from "../entities/MenuItemFromTicket";
 import { Ad } from "../entities/Ad";
 
 dotenv.config();
@@ -40,5 +42,8 @@ export const AppDataSource = new DataSource({
     MenuItemVariant, 
     MenuCartItem, 
     MenuPurchase, 
-    MenuPurchaseTransaction,],
+    MenuPurchaseTransaction,
+    TicketIncludedMenuItem,
+    MenuItemFromTicket,
+  ],
 });

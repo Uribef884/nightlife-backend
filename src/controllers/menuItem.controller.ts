@@ -3,6 +3,8 @@ import { AppDataSource } from "../config/data-source";
 import { MenuItem } from "../entities/MenuItem";
 import { MenuCategory } from "../entities/MenuCategory";
 import { MenuItemVariant } from "../entities/MenuItemVariant";
+import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
+import { MenuPurchase } from "../entities/MenuPurchase";
 import { Club } from "../entities/Club";
 import { AuthenticatedRequest } from "../types/express";
 import { sanitizeInput } from "../utils/sanitizeInput";
@@ -182,15 +184,15 @@ export const getAllMenuItems = async (req: AuthenticatedRequest, res: Response):
   try {
     const repo = AppDataSource.getRepository(MenuItem);
     const items = await repo.find({
-      where: { isActive: true },
+      where: { isActive: true, isDeleted: false },
       relations: ["variants"],
       order: { name: "ASC" },
     });
 
-    // Filter out inactive variants
+    // Filter out inactive and soft-deleted variants
     items.forEach(item => {
       if (item.variants) {
-        item.variants = item.variants.filter(v => v.isActive);
+        item.variants = item.variants.filter(v => v.isActive && !v.isDeleted);
       }
     });
 
@@ -206,7 +208,7 @@ export const getMenuItemById = async (req: AuthenticatedRequest, res: Response):
     const { id } = req.params;
     const repo = AppDataSource.getRepository(MenuItem);
     const item = await repo.findOne({
-      where: { id },
+      where: { id, isDeleted: false },
       relations: ["category", "club", "variants"],
     });
 
@@ -215,8 +217,8 @@ export const getMenuItemById = async (req: AuthenticatedRequest, res: Response):
       return;
     }
 
-    // Filter inactive variants
-    item.variants = item.variants?.filter(v => v.isActive) ?? [];
+    // Filter inactive and soft-deleted variants
+    item.variants = item.variants?.filter(v => v.isActive && !v.isDeleted) ?? [];
 
     res.json(item);
   } catch (err) {
@@ -238,6 +240,7 @@ export const getItemsForMyClub = async (req: AuthenticatedRequest, res: Response
       where: {
         clubId: user.clubId,
         isActive: true,
+        isDeleted: false,
       },
       relations: ["category", "variants"],
       order: { name: "ASC" },
@@ -245,7 +248,7 @@ export const getItemsForMyClub = async (req: AuthenticatedRequest, res: Response
 
     items.forEach(item => {
       if (item.variants) {
-        item.variants = item.variants.filter(v => v.isActive);
+        item.variants = item.variants.filter(v => v.isActive && !v.isDeleted);
       }
     });
 
@@ -268,18 +271,61 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
 
     const itemRepo = AppDataSource.getRepository(MenuItem);
     const variantRepo = AppDataSource.getRepository(MenuItemVariant);
+    const ticketIncludedMenuItemRepo = AppDataSource.getRepository(TicketIncludedMenuItem);
+    const menuPurchaseRepo = AppDataSource.getRepository(MenuPurchase);
 
-    const item = await itemRepo.findOne({ where: { id } });
+    const item = await itemRepo.findOne({ 
+      where: { id, isDeleted: false } 
+    });
 
     if (!item || item.clubId !== user.clubId) {
       res.status(403).json({ error: "Item not found or not owned by your club" });
       return;
     }
 
-    await variantRepo.delete({ menuItemId: id });
-    await itemRepo.remove(item);
+    // Check if menu item is included in any active ticket bundles
+    const includedInTickets = await ticketIncludedMenuItemRepo.count({
+      where: { menuItemId: id }
+    });
 
-    res.json({ message: "Menu item and variants deleted successfully" });
+    // Check if menu item has any existing purchases
+    const existingPurchases = await menuPurchaseRepo.count({
+      where: { menuItemId: id }
+    });
+
+    if (includedInTickets > 0 || existingPurchases > 0) {
+      // Soft delete - mark as deleted but keep the record
+      item.isDeleted = true;
+      item.deletedAt = new Date();
+      item.isActive = false; // Also deactivate to prevent new usage
+      await itemRepo.save(item);
+
+      // Also soft delete all variants of this menu item
+      const variants = await variantRepo.find({ where: { menuItemId: id } });
+      for (const variant of variants) {
+        variant.isDeleted = true;
+        variant.deletedAt = new Date();
+        variant.isActive = false;
+        await variantRepo.save(variant);
+      }
+
+      res.json({ 
+        message: "Menu item soft deleted successfully", 
+        deletedAt: item.deletedAt,
+        includedInTickets,
+        existingPurchases,
+        note: "Menu item marked as deleted but preserved due to existing purchases or ticket bundles"
+      });
+    } else {
+      // Hard delete - no associated ticket bundles, safe to completely remove
+      await variantRepo.delete({ menuItemId: id });
+      await itemRepo.remove(item);
+
+      res.json({ 
+        message: "Menu item permanently deleted successfully",
+        note: "No associated ticket bundles found, menu item completely removed"
+      });
+    }
   } catch (err) {
     console.error("Error deleting menu item:", err);
     res.status(500).json({ error: "Failed to delete menu item" });
@@ -291,19 +337,20 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
       const { clubId } = req.params;
       const repo = AppDataSource.getRepository(MenuItem);
 
-      const items = await repo.find({
-        where: {
-          clubId,
-          isActive: true,
-        },
-        relations: ["category", "variants"],
-        order: {
-          category: {
-            name: "ASC",
-          },
+          const items = await repo.find({
+      where: {
+        clubId,
+        isActive: true,
+        isDeleted: false,
+      },
+      relations: ["category", "variants"],
+      order: {
+        category: {
           name: "ASC",
         },
-      });
+        name: "ASC",
+      },
+    });
 
       items.forEach(item => {
         if (item.variants) {
@@ -327,6 +374,7 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
       where: {
         clubId,
         isActive: true,
+        isDeleted: false,
       },
       relations: ["category", "variants"],
       order: {
@@ -335,11 +383,11 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
       },
     });
 
-    // Filter inactive variants and group by category
+    // Filter inactive and soft-deleted variants and group by category
     const grouped: Record<string, any> = {};
 
     items.forEach(item => {
-      const variants = item.variants?.filter(v => v.isActive) ?? [];
+      const variants = item.variants?.filter(v => v.isActive && !v.isDeleted) ?? [];
 
       const publicItem = {
         id: item.id,

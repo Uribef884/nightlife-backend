@@ -21,6 +21,12 @@ export class MenuItemVariant {
   @Column({ default: true })
   isActive!: boolean;
 
+  @Column({ default: false })
+  isDeleted!: boolean;
+
+  @Column({ type: "timestamp", nullable: true })
+  deletedAt?: Date;
+
   @ManyToOne(() => MenuItem, (item) => item.variants)
   menuItem!: MenuItem;
 }

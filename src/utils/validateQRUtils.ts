@@ -71,7 +71,7 @@ export function checkTicketDateIsValid(ticketDate: Date): boolean {
   return nowColombia >= eventStart && nowColombia <= eventEnd;
 }
 
-export function validateQRType(type: string, expected: "menu" | "ticket"): boolean {
+export function validateQRType(type: string, expected: "menu" | "ticket" | "menu_from_ticket"): boolean {
   return type === expected;
 }
 
@@ -189,6 +189,95 @@ export async function validateTicketPurchase(
         return { 
           isValid: false, 
           error: `This ticket was for ${eventDateDisplay} and is no longer valid (expired at 1:00 AM next day).` 
+        };
+      }
+    }
+
+    return { isValid: true, purchase };
+  } catch (error) {
+    return { isValid: false, error: "Invalid QR code" };
+  }
+} 
+
+export async function validateMenuFromTicketPurchase(
+  qrCode: string,
+  user: { id: string; role: string; clubId?: string }
+): Promise<{
+  isValid: boolean;
+  purchase?: TicketPurchase;
+  error?: string;
+}> {
+  try {
+    const payload = decryptQR(qrCode);
+
+    if (!validateQRType(payload.type, "menu_from_ticket")) {
+      return { isValid: false, error: "Invalid QR type for menu from ticket validation" };
+    }
+
+    if (!payload.ticketPurchaseId) {
+      return { isValid: false, error: "Missing ticket purchase ID in QR code" };
+    }
+
+    // Only waiters can validate menu_from_ticket QRs
+    if (user.role !== "waiter") {
+      return { isValid: false, error: "Only waiters can validate menu QR codes from tickets" };
+    }
+
+    const purchaseRepository = AppDataSource.getRepository(TicketPurchase);
+    const purchase = await purchaseRepository.findOne({
+      where: { id: payload.ticketPurchaseId },
+      relations: ["ticket", "club"]
+    });
+
+    if (!purchase) {
+      return { isValid: false, error: "Ticket purchase not found" };
+    }
+
+    const hasAccess = await validateClubAccess(user, purchase.clubId);
+    if (!hasAccess) {
+      return { isValid: false, error: "Access denied to this club" };
+    }
+
+    // Check if menu QR has already been used
+    if (purchase.isUsedMenu) {
+      return { isValid: false, error: "Menu QR already used" };
+    }
+
+    // Check if ticket date is valid (same logic as ticket validation)
+    if (!checkTicketDateIsValid(purchase.date)) {
+      const eventDateValue = purchase.date as any;
+      let eventDateStr: string;
+      
+      if (typeof eventDateValue === 'string') {
+        eventDateStr = eventDateValue.includes('T') ? eventDateValue.split('T')[0] : eventDateValue;
+      } else if (eventDateValue instanceof Date) {
+        eventDateStr = eventDateValue.toISOString().split('T')[0];
+      } else {
+        eventDateStr = String(eventDateValue).split('T')[0];
+      }
+      
+      const [year, month, day] = eventDateStr.split('-').map(Number);
+      const displayDate = new Date(year, month - 1, day);
+      const eventDateDisplay = displayDate.toLocaleDateString('es-CO', { 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+      
+      const nowUTC = new Date();
+      const colombiaOffset = -5 * 60;
+      const nowColombia = new Date(nowUTC.getTime() + (colombiaOffset * 60 * 1000));
+      const eventStart = new Date(year, month - 1, day);
+      
+      if (nowColombia < eventStart) {
+        return { 
+          isValid: false, 
+          error: `This menu QR is for a future event (${eventDateDisplay}). Valid only on event date.` 
+        };
+      } else {
+        return { 
+          isValid: false, 
+          error: `This menu QR was for ${eventDateDisplay} and is no longer valid (expired at 1:00 AM next day).` 
         };
       }
     }

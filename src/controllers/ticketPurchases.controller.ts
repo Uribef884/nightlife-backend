@@ -6,11 +6,53 @@ import { ILike, Between } from "typeorm";
 import { AuthenticatedRequest } from "../types/express";
 import { startOfDay, endOfDay} from "date-fns";
 import type { JwtPayload } from "../types/jwt";
+import { MenuItemFromTicket } from "../entities/MenuItemFromTicket";
 
 type Role = JwtPayload["role"];
 
-// 👁 Filter response by role
-function formatTransaction(tx: PurchaseTransaction, role: Role) {
+// 🕵️ Helper to fetch menu items for a purchase
+async function getMenuItemsForPurchase(purchaseId: string) {
+  const repo = AppDataSource.getRepository(MenuItemFromTicket);
+  const items = await repo.find({
+    where: { ticketPurchaseId: purchaseId },
+    relations: ["menuItem", "variant"]
+  });
+  return items.map(item => ({
+    id: item.id,
+    menuItemId: item.menuItemId,
+    menuItemName: item.menuItem.name,
+    variantId: item.variantId,
+    variantName: item.variant?.name || null,
+    quantity: item.quantity
+  }));
+}
+
+// 🧩 Enhanced formatTransaction to include menu items if ticket includes them
+async function formatTransactionWithMenu(tx: PurchaseTransaction, role: Role) {
+  // For each purchase, if ticket.includesMenuItem, fetch menu items
+  const purchases = await Promise.all(tx.purchases.map(async (p) => {
+    let menuItems: Array<{
+      id: string;
+      menuItemId: string;
+      menuItemName: string;
+      variantId?: string;
+      variantName: string | null;
+      quantity: number;
+    }> = [];
+    if (p.ticket && p.ticket.includesMenuItem) {
+      menuItems = await getMenuItemsForPurchase(p.id);
+    }
+    return {
+      id: p.id,
+      ticketId: p.ticketId,
+      date: p.date,
+      userPaid: p.userPaid,
+      ticket: p.ticket,
+      qrCodeEncrypted: p.qrCodeEncrypted,
+      menuItems
+    };
+  }));
+
   const base = {
     id: tx.id,
     email: tx.email,
@@ -18,14 +60,7 @@ function formatTransaction(tx: PurchaseTransaction, role: Role) {
     userId: tx.user?.id ?? null,
     clubId: tx.clubId,
     totalPaid: tx.totalPaid,
-    purchases: tx.purchases.map((p) => ({
-      id: p.id,
-      ticketId: p.ticketId,
-      date: p.date,
-      userPaid: p.userPaid,
-      ticket: p.ticket,
-      qrCodeEncrypted: p.qrCodeEncrypted,
-    })),
+    purchases,
   };
 
   if (role === "admin") {
@@ -40,7 +75,6 @@ function formatTransaction(tx: PurchaseTransaction, role: Role) {
       retentionFuente: tx.retentionFuente,
     };
   }
-
   if (role === "clubowner") {
     return {
       ...base,
@@ -48,7 +82,6 @@ function formatTransaction(tx: PurchaseTransaction, role: Role) {
       platformReceives: tx.platformReceives,
     };
   }
-
   return base;
 }
 
@@ -99,7 +132,8 @@ async function findTransactions(where: any, role: Role, query: any): Promise<Pur
 export const getUserPurchases = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const userId = req.user!.id;
   const results = await findTransactions({ userId }, "user", req.query);
-  res.json(results.map((tx) => formatTransaction(tx, "user")));
+  const formatted = await Promise.all(results.map((tx) => formatTransactionWithMenu(tx, "user")));
+  res.json(formatted);
 };
 
 export const getUserPurchaseById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -117,38 +151,34 @@ export const getUserPurchaseById = async (req: AuthenticatedRequest, res: Respon
     return;
   }
 
-  res.json(formatTransaction(tx, "user"));
+  res.json(await formatTransactionWithMenu(tx, "user"));
 };
 
 // 🏢 Club Owner
 export const getClubPurchases = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const clubId = req.user?.clubId;
-
   if (!clubId) {
     res.status(403).json({ error: "Unauthorized: No club ID associated with this user" });
     return;
   }
-
   const txs = await findTransactions({ clubId }, "clubowner", req.query);
-  res.json(txs.map((tx) => formatTransaction(tx, "clubowner")));
+  const formatted = await Promise.all(txs.map((tx) => formatTransactionWithMenu(tx, "clubowner")));
+  res.json(formatted);
 };
 
 export const getClubPurchaseById = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const clubId = req.user!.clubId!;
   const id = req.params.id;
   const txRepo = AppDataSource.getRepository(PurchaseTransaction);
-
   const tx = await txRepo.findOne({
     where: { id, clubId },
     relations: ["purchases", "purchases.ticket"],
   });
-
   if (!tx) {
     res.status(404).json({ error: "Not found or unauthorized" });
     return;
   }
-
-  res.json(formatTransaction(tx, "clubowner"));
+  res.json(await formatTransactionWithMenu(tx, "clubowner"));
 };
 
 export const validateTicketQR = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
@@ -210,22 +240,20 @@ export const validateTicketQR = async (req: AuthenticatedRequest, res: Response)
 // 🛡 Admin
 export const getAllPurchasesAdmin = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const txs = await findTransactions({}, "admin", req.query);
-  res.json(txs.map((tx) => formatTransaction(tx, "admin")));
+  const formatted = await Promise.all(txs.map((tx) => formatTransactionWithMenu(tx, "admin")));
+  res.json(formatted);
 };
 
 export const getPurchaseByIdAdmin = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const id = req.params.id;
   const txRepo = AppDataSource.getRepository(PurchaseTransaction);
-
   const tx = await txRepo.findOne({
     where: { id },
     relations: ["purchases", "purchases.ticket"],
   });
-
   if (!tx) {
     res.status(404).json({ error: "Not found" });
     return;
   }
-
-  res.json(formatTransaction(tx, "admin"));
+  res.json(await formatTransactionWithMenu(tx, "admin"));
 };

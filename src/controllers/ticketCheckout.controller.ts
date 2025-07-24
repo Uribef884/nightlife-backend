@@ -4,10 +4,14 @@ import { CartItem } from "../entities/TicketCartItem";
 import { Ticket } from "../entities/Ticket";
 import { TicketPurchase } from "../entities/TicketPurchase";
 import { PurchaseTransaction } from "../entities/TicketPurchaseTransaction";
+import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
+import { MenuItemFromTicket } from "../entities/MenuItemFromTicket";
+import { MenuItem } from "../entities/MenuItem";
+import { MenuItemVariant } from "../entities/MenuItemVariant";
 import { calculatePlatformFee, calculateGatewayFees } from "../utils/ticketfeeUtils";
 import { isDisposableEmail } from "../utils/disposableEmailValidator";
 import { generateEncryptedQR } from "../utils/generateEncryptedQR";
-import { sendTicketEmail } from "../services/emailService";
+import { sendTicketEmail, sendMenuFromTicketEmail } from "../services/emailService";
 import { differenceInMinutes } from "date-fns";
 import { mockValidateWompiTransaction } from "../services/mockWompiService";
 import { User } from "../entities/User";
@@ -150,6 +154,11 @@ export const processSuccessfulCheckout = async ({
   await transactionRepo.save(purchaseTransaction);
 
   // Now create the individual ticket purchases and associate them with the transaction
+  const ticketIncludedMenuItemRepo = AppDataSource.getRepository(TicketIncludedMenuItem);
+  const menuItemFromTicketRepo = AppDataSource.getRepository(MenuItemFromTicket);
+  const menuItemRepo = AppDataSource.getRepository(MenuItem);
+  const menuItemVariantRepo = AppDataSource.getRepository(MenuItemVariant);
+
   for (const item of cartItems) {
     const ticket = item.ticket;
     const quantity = item.quantity;
@@ -211,6 +220,67 @@ export const processSuccessfulCheckout = async ({
         });
       } catch (err) {
         console.error(`[EMAIL ❌] Ticket ${i + 1} failed:`, err);
+      }
+
+      // Handle menu items if ticket includes them
+      if (ticket.includesMenuItem) {
+        try {
+          // Get included menu items for this ticket
+          const includedMenuItems = await ticketIncludedMenuItemRepo.find({
+            where: { ticketId: ticket.id },
+            relations: ["menuItem", "variant"]
+          });
+
+          if (includedMenuItems.length > 0) {
+            // Generate menu QR payload
+            const menuPayload = {
+              type: "menu_from_ticket" as const,
+              ticketPurchaseId: purchase.id,
+              clubId,
+              items: includedMenuItems.map(item => ({
+                menuItemId: item.menuItemId,
+                variantId: item.variantId || undefined,
+                quantity: item.quantity
+              }))
+            };
+
+            const menuEncryptedPayload = await generateEncryptedQR(menuPayload);
+            const menuQrDataUrl = await QRCode.toDataURL(menuEncryptedPayload);
+
+            // Create records for analytics
+            const menuItemFromTicketRecords = includedMenuItems.map(item => 
+              menuItemFromTicketRepo.create({
+                ticketPurchaseId: purchase.id,
+                menuItemId: item.menuItemId,
+                variantId: item.variantId || undefined,
+                quantity: item.quantity
+              })
+            );
+
+            await menuItemFromTicketRepo.save(menuItemFromTicketRecords);
+
+            // Send menu email
+            const menuItems = includedMenuItems.map(item => ({
+              name: item.menuItem.name,
+              variant: item.variant?.name || null,
+              quantity: item.quantity
+            }));
+
+            await sendMenuFromTicketEmail({
+              to: email,
+              email: email,
+              ticketName: ticket.name,
+              date: rawDateStr,
+              qrImageDataUrl: menuQrDataUrl,
+              clubName: ticket.club?.name || "Your Club",
+              items: menuItems,
+              index: i,
+              total: quantity,
+            });
+          }
+        } catch (err) {
+          console.error(`[MENU EMAIL ❌] Menu items for ticket ${i + 1} failed:`, err);
+        }
       }
     }
   }

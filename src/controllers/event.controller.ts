@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { Event } from "../entities/Event";
 import { AuthenticatedRequest } from "../types/express";
+import { Ticket } from "../entities/Ticket";
 
 // GET /events — public
 export const getAllEvents = async (req: Request, res: Response) => {
@@ -172,43 +173,53 @@ export const deleteEvent = async (req: AuthenticatedRequest, res: Response) => {
     }
 
     // Check if event has purchased tickets
+    let hasPurchases = false;
+    let ticketIds: string[] = [];
     if (event.tickets && event.tickets.length > 0) {
-      // Check if any tickets have been purchased
       const { TicketPurchase } = await import("../entities/TicketPurchase");
       const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
-      
-      const ticketIds = event.tickets.map(ticket => ticket.id);
+      ticketIds = event.tickets.map(ticket => ticket.id);
       const existingPurchases = await purchaseRepo
         .createQueryBuilder("purchase")
         .where("purchase.ticketId IN (:...ticketIds)", { ticketIds })
         .getCount();
-
-      if (existingPurchases > 0) {
-        res.status(400).json({ 
-          error: "Cannot delete event with purchased tickets. Please contact support if you need to cancel this event." 
-        });
-        return;
-      }
+      hasPurchases = existingPurchases > 0;
     }
 
-    // Store reference to banner for S3 cleanup
     const bannerUrl = event.bannerUrl;
+    const ticketRepo = AppDataSource.getRepository(Ticket);
 
-    // Delete the event (this will CASCADE delete tickets due to onDelete: "CASCADE")
+    if (hasPurchases) {
+      // Soft delete event
+      event.isDeleted = true;
+      event.deletedAt = new Date();
+      event.isActive = false;
+      await eventRepo.save(event);
+      // Soft delete all related tickets
+      if (event.tickets && event.tickets.length > 0) {
+        for (const ticket of event.tickets) {
+          ticket.isDeleted = true;
+          ticket.deletedAt = new Date();
+          ticket.isActive = false;
+          await ticketRepo.save(ticket);
+        }
+      }
+      res.status(200).json({ message: "Event and related tickets soft deleted due to existing purchases" });
+      return;
+    }
+
+    // Hard delete (no purchases)
     await eventRepo.remove(event);
 
     // Delete banner from S3 if it exists
     if (bannerUrl) {
       try {
         const { S3Service } = await import("../services/s3Service");
-        // Parse the S3 URL to extract the key
         const url = new URL(bannerUrl);
-        const key = url.pathname.substring(1); // Remove leading slash
-        
+        const key = url.pathname.substring(1);
         await S3Service.deleteFile(key);
       } catch (deleteError) {
         console.error('⚠️ Warning: Failed to delete event banner from S3:', deleteError);
-        // Don't fail the request - event is already deleted
       }
     }
 

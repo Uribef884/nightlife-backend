@@ -6,6 +6,9 @@ import { AuthenticatedRequest } from "../types/express";
 import { TicketPurchase } from "../entities/TicketPurchase"; 
 import { Event } from "../entities/Event";
 import { TicketCategory } from "../entities/Ticket";
+import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
+import { MenuItem } from "../entities/MenuItem";
+import { MenuItemVariant } from "../entities/MenuItemVariant";
 
 // Utility to normalize today's date
 const getTodayISO = (): string => {
@@ -16,10 +19,14 @@ const getTodayISO = (): string => {
 
 // CREATE TICKET
 export async function createTicket(req: Request, res: Response): Promise<void> {
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
   try {
     const user = req.user;
     if (!user) {
       res.status(401).json({ error: "Unauthorized" });
+      await queryRunner.rollbackTransaction();
       return;
     }
 
@@ -35,19 +42,40 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       category,
       eventId, // ✅ clubId removed from destructuring
       dynamicPricingEnabled, // <-- add this to destructuring
+      includesMenuItem,
+      menuItems, // Array of menu items to include
     } = req.body;
 
     if (!name || price == null || maxPerPerson == null || priority == null || !category) {
       res.status(400).json({ error: "Missing required fields" });
+      await queryRunner.rollbackTransaction();
       return;
     }
 
     if (price < 0 || maxPerPerson < 0 || priority < 1) {
       res.status(400).json({ error: "Invalid price, maxPerPerson, or priority" });
+      await queryRunner.rollbackTransaction();
       return;
     }
 
-    const clubRepo = AppDataSource.getRepository(Club);
+    // Validate includesMenuItem and menuItems consistency
+    if (includesMenuItem && (!menuItems || !Array.isArray(menuItems) || menuItems.length === 0)) {
+      res.status(400).json({ 
+        error: "When includesMenuItem is true, menuItems array must be provided with at least one item" 
+      });
+      await queryRunner.rollbackTransaction();
+      return;
+    }
+
+    if (!includesMenuItem && menuItems && menuItems.length > 0) {
+      res.status(400).json({ 
+        error: "When includesMenuItem is false, menuItems should not be provided" 
+      });
+      await queryRunner.rollbackTransaction();
+      return;
+    }
+
+    const clubRepo = queryRunner.manager.getRepository(Club);
     let club: Club | null = null;
 
     // 🔐 Admins must specify clubId
@@ -55,6 +83,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       const { clubId } = req.body;
       if (!clubId) {
         res.status(400).json({ error: "Admin must specify clubId" });
+        await queryRunner.rollbackTransaction();
         return;
       }
       club = await clubRepo.findOne({ where: { id: clubId }, relations: ["owner"] });
@@ -67,6 +96,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
 
     if (!club) {
       res.status(403).json({ error: "Unauthorized or club not found" });
+      await queryRunner.rollbackTransaction();
       return;
     }
 
@@ -75,11 +105,12 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
     let event: Event | null = null;
 
     if (eventId) {
-      const eventRepo = AppDataSource.getRepository(Event);
+      const eventRepo = queryRunner.manager.getRepository(Event);
       event = await eventRepo.findOne({ where: { id: eventId }, relations: ["club"] });
 
       if (!event || event.clubId !== club.id) {
         res.status(404).json({ error: "Event not found or not owned by your club" });
+        await queryRunner.rollbackTransaction();
         return;
       }
 
@@ -94,6 +125,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       today.setHours(0, 0, 0, 0);
       if (parsedDate < today) {
         res.status(400).json({ error: "Available date cannot be in the past" });
+        await queryRunner.rollbackTransaction();
         return;
       }
     }
@@ -105,7 +137,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       dynamicPricing = !!dynamicPricingEnabled;
     }
 
-    const ticketRepo = AppDataSource.getRepository(Ticket);
+    const ticketRepo = queryRunner.manager.getRepository(Ticket);
     const ticket = ticketRepo.create({
       name,
       description,
@@ -120,13 +152,105 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       club, // ✅ set by lookup, not user input
       ...(event ? { event } : {}),
       dynamicPricingEnabled: dynamicPricing,
+      includesMenuItem: includesMenuItem ?? false,
     });
 
-    const saved = await ticketRepo.save(ticket);
-    res.status(201).json(saved);
+    // Validate menu items before saving anything
+    if (includesMenuItem && menuItems && menuItems.length > 0) {
+      const ticketIncludedMenuItemRepo = queryRunner.manager.getRepository(TicketIncludedMenuItem);
+      const menuItemRepo = queryRunner.manager.getRepository(MenuItem);
+      const menuItemVariantRepo = queryRunner.manager.getRepository(MenuItemVariant);
+
+      const menuItemRecords = [];
+
+      for (const menuItem of menuItems) {
+        const { menuItemId, variantId, quantity } = menuItem;
+
+        if (!menuItemId || !quantity || quantity <= 0) {
+          res.status(400).json({ 
+            error: "Each menu item must have menuItemId and positive quantity" 
+          });
+          await queryRunner.rollbackTransaction();
+          return;
+        }
+
+        // Verify menu item exists and belongs to the club
+        const menuItemEntity = await menuItemRepo.findOne({
+          where: { id: menuItemId, clubId: club.id, isDeleted: false }
+        });
+
+        if (!menuItemEntity) {
+          res.status(400).json({ 
+            error: `Menu item ${menuItemId} not found or not owned by your club` 
+          });
+          await queryRunner.rollbackTransaction();
+          return;
+        }
+
+        // Check if menu item has variants
+        const variants = await menuItemVariantRepo.find({
+          where: { menuItemId, isActive: true, isDeleted: false }
+        });
+
+        if (variants.length > 0 && !variantId) {
+          res.status(400).json({ 
+            error: `Menu item ${menuItemEntity.name} has variants. Please specify a variantId` 
+          });
+          await queryRunner.rollbackTransaction();
+          return;
+        }
+
+        if (variantId) {
+          // Verify variant exists and belongs to the menu item
+          const variant = await menuItemVariantRepo.findOne({
+            where: { id: variantId, menuItemId, isActive: true, isDeleted: false }
+          });
+
+          if (!variant) {
+            res.status(400).json({ 
+              error: `Variant ${variantId} not found or not active for menu item ${menuItemEntity.name}` 
+            });
+            await queryRunner.rollbackTransaction();
+            return;
+          }
+        }
+
+        // Prepare the ticket included menu item record
+        const ticketIncludedMenuItem = ticketIncludedMenuItemRepo.create({
+          // ticketId will be set after ticket is saved
+          menuItemId,
+          variantId: variantId || undefined,
+          quantity
+        });
+
+        menuItemRecords.push(ticketIncludedMenuItem);
+      }
+
+      // Save the ticket first
+      const saved = await ticketRepo.save(ticket);
+
+      // Now set ticketId and save menu item records
+      for (const record of menuItemRecords) {
+        record.ticketId = saved.id;
+      }
+      await queryRunner.manager.getRepository(TicketIncludedMenuItem).save(menuItemRecords);
+
+      await queryRunner.commitTransaction();
+      res.status(201).json(saved);
+      return;
+    } else {
+      // No menu items, just save the ticket
+      const saved = await ticketRepo.save(ticket);
+      await queryRunner.commitTransaction();
+      res.status(201).json(saved);
+      return;
+    }
   } catch (error) {
+    await queryRunner.rollbackTransaction();
     console.error("❌ Error creating ticket:", error);
     res.status(500).json({ error: "Internal server error" });
+  } finally {
+    await queryRunner.release();
   }
 }
 
@@ -171,6 +295,14 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
   if ("eventId" in updates && updates.eventId !== ticket.eventId) {
     res.status(400).json({
       error: "Cannot change eventId after ticket creation",
+    });
+    return;
+  }
+
+  // ❌ Prevent changing includesMenuItem flag
+  if ("includesMenuItem" in updates && updates.includesMenuItem !== ticket.includesMenuItem) {
+    res.status(400).json({
+      error: "Cannot change includesMenuItem flag after ticket creation",
     });
     return;
   }
@@ -302,7 +434,7 @@ export async function getAllTickets(req: Request, res: Response): Promise<void> 
   try {
     const repo = AppDataSource.getRepository(Ticket);
     const tickets = await repo.find({
-      where: { isActive: true },
+      where: { isActive: true, isDeleted: false },
       relations: ["club"],
       order: { priority: "ASC" },
     });
@@ -325,7 +457,7 @@ export async function getTicketsByClub(req: Request, res: Response): Promise<voi
     const { id } = req.params;
     const repo = AppDataSource.getRepository(Ticket);
     const tickets = await repo.find({
-      where: { club: { id } },
+      where: { club: { id }, isDeleted: false },
       order: { priority: "ASC" },
     });
 
@@ -353,7 +485,10 @@ export async function getTicketById(req: AuthenticatedRequest, res: Response): P
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const { id } = req.params;
 
-    const ticket = await ticketRepo.findOne({ where: { id }, relations: ["club"] });
+    const ticket = await ticketRepo.findOne({ 
+      where: { id, isDeleted: false }, 
+      relations: ["club"] 
+    });
 
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
@@ -397,7 +532,7 @@ export const getTicketsForMyClub = async (req: AuthenticatedRequest, res: Respon
     }
 
     const tickets = await ticketRepo.find({
-      where: { club: { id: club.id } },
+      where: { club: { id: club.id }, isDeleted: false },
       order: { priority: "ASC" },
     });
 
@@ -423,8 +558,13 @@ export async function deleteTicket(req: Request, res: Response): Promise<void> {
     }
 
     const { id } = req.params;
-    const repo = AppDataSource.getRepository(Ticket);
-    const ticket = await repo.findOne({ where: { id }, relations: ["club", "club.owner"] });
+    const ticketRepo = AppDataSource.getRepository(Ticket);
+    const purchaseRepo = AppDataSource.getRepository(TicketPurchase);
+    
+    const ticket = await ticketRepo.findOne({ 
+      where: { id }, 
+      relations: ["club", "club.owner"] 
+    });
 
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
@@ -436,8 +576,30 @@ export async function deleteTicket(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    await repo.remove(ticket);
-    res.json({ message: "Ticket deleted successfully" });
+    // Check if there are associated purchases
+    const associatedPurchases = await purchaseRepo.count({ where: { ticketId: id } });
+
+    if (associatedPurchases > 0) {
+      // Soft delete - mark as deleted but keep the record
+      ticket.isDeleted = true;
+      ticket.deletedAt = new Date();
+      ticket.isActive = false; // Also deactivate to prevent new purchases
+      await ticketRepo.save(ticket);
+      
+      res.json({ 
+        message: "Ticket soft deleted successfully", 
+        deletedAt: ticket.deletedAt,
+        associatedPurchases,
+        note: "Ticket marked as deleted but preserved due to existing purchases"
+      });
+    } else {
+      // Hard delete - no associated purchases, safe to completely remove
+      await ticketRepo.remove(ticket);
+      res.json({ 
+        message: "Ticket permanently deleted successfully",
+        note: "No associated purchases found, ticket completely removed"
+      });
+    }
   } catch (error) {
     console.error("❌ Error deleting ticket:", error);
     res.status(500).json({ error: "Internal server error" });
