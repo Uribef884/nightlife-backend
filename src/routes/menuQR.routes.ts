@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireWaiterOrClubOwner } from "../middlewares/requireWaiterOrClubOwner";
-import { previewMenuQR, confirmMenuQR } from "../controllers/validateMenuQR.controller";
+import { previewUnifiedMenuQR, confirmUnifiedMenuQR } from "../controllers/unifiedMenuQR.controller";
 
 const router = Router();
 
@@ -12,9 +12,9 @@ router.use(requireAuth);
 router.use(requireWaiterOrClubOwner);
 
 // Preview route - safe to read without invalidating
-router.post("/", previewMenuQR);
+router.post("/", previewUnifiedMenuQR);
 
 // Confirm route - marks QR as used
-router.post("/confirm", confirmMenuQR);
+router.post("/confirm", confirmUnifiedMenuQR);
 
 export default router; 
