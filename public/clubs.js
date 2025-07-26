@@ -255,6 +255,26 @@ function loadMenuItemImage(item, canvasId, imageId) {
 }
 
 // --- Club detail view ---
+
+function formatLocalDate(dateStr) {
+  if (!dateStr) return '';
+  const [year, month, day] = dateStr.split('T')[0].split('-').map(Number);
+  // JS months are 0-based
+  const date = new Date(year, month - 1, day);
+  return date.toLocaleDateString();
+}
+
+// Helper to render price with dynamic price
+function renderPrice(oldPrice, dynamicPrice) {
+  if (dynamicPrice !== undefined && dynamicPrice !== null && Number(dynamicPrice) !== Number(oldPrice)) {
+    return `<span style="text-decoration:line-through;color:#aaa;">$${Number(oldPrice).toFixed(2)}</span> <span style="color:#a78bfa;font-weight:bold;">$${Number(dynamicPrice).toFixed(2)}</span>`;
+  } else if (oldPrice !== undefined && oldPrice !== null) {
+    return `$${Number(oldPrice).toFixed(2)}`;
+  } else {
+    return '';
+  }
+}
+
 async function showClubDetail(clubId) {
   stopPolling();
   loadingEl.style.display = '';
@@ -326,7 +346,7 @@ function renderClubDetail(club, tickets, menu, events) {
               <span class="event-id">ID: ${event.id}</span>
               <div class="event-title">${event.name}</div>
               <div>${event.description || ''}</div>
-              <div class="info-row"><span class="info-label">Date:</span> ${event.availableDate ? new Date(event.availableDate).toLocaleDateString() : ''}</div>
+              <div class="info-row"><span class="info-label">Date:</span> ${event.availableDate ? formatLocalDate(event.availableDate) : ''}</div>
               ${event.bannerUrl ? `
                 <div class="event-banner-container">
                   <canvas id="${bannerCanvasId}" class="event-banner-blurhash"></canvas>
@@ -340,7 +360,7 @@ function renderClubDetail(club, tickets, menu, events) {
                     ${event.tickets.map(ticket => `
                       <li class="ticket-item">
                         <span class="ticket-id">ID: ${ticket.id}</span>
-                        <div><b>${ticket.name}</b> - $${ticket.price}</div>
+                        <div><b>${ticket.name}</b> - ${renderPrice(ticket.price, ticket.dynamicPrice)}</div>
                         <div>${ticket.description || ''}</div>
                         <div style="margin-top:4px;font-size:0.9em;color:#a78bfa;">
                           ${ticket.quantity !== null ? 
@@ -348,6 +368,18 @@ function renderClubDetail(club, tickets, menu, events) {
                             'Unlimited tickets'
                           }
                         </div>
+                        ${ticket.includesMenuItem ? `
+                          <div style="margin-top:8px;padding:8px;background:#1a1b2e;border-radius:4px;border-left:3px solid #a78bfa;">
+                            <div style="font-size:0.9em;color:#a78bfa;margin-bottom:4px;">🍽️ Includes Menu Items:</div>
+                            ${ticket.includedMenuItems ? ticket.includedMenuItems.map(menuItem => `
+                              <div style="font-size:0.85em;margin-left:8px;margin-bottom:2px;">
+                                • ${menuItem.menuItemName}
+                                ${menuItem.variantName ? ` (${menuItem.variantName})` : ''}
+                                <span style="color:#28a745;margin-left:8px;">x${menuItem.quantity}</span>
+                              </div>
+                            `).join('') : '<div style="font-size:0.85em;margin-left:8px;color:#666;">Loading included items...</div>'}
+                          </div>
+                        ` : ''}
                       </li>
                     `).join('')}
                   </ul>
@@ -364,7 +396,7 @@ function renderClubDetail(club, tickets, menu, events) {
         ${generalTickets.map(ticket => `
           <li class="ticket-item">
             <span class="ticket-id">ID: ${ticket.id}</span>
-            <div><b>${ticket.name}</b> - $${ticket.price}</div>
+            <div><b>${ticket.name}</b> - ${renderPrice(ticket.price, ticket.dynamicPrice)}</div>
             <div>${ticket.description || ''}</div>
             <div style="margin-top:4px;font-size:0.9em;color:#a78bfa;">
               ${ticket.quantity !== null ? 
@@ -372,6 +404,18 @@ function renderClubDetail(club, tickets, menu, events) {
                 'Unlimited tickets'
               }
             </div>
+            ${ticket.includesMenuItem ? `
+              <div style="margin-top:8px;padding:8px;background:#1a1b2e;border-radius:4px;border-left:3px solid #a78bfa;">
+                <div style="font-size:0.9em;color:#a78bfa;margin-bottom:4px;">🍽️ Includes Menu Items:</div>
+                ${ticket.includedMenuItems ? ticket.includedMenuItems.map(menuItem => `
+                  <div style="font-size:0.85em;margin-left:8px;margin-bottom:2px;">
+                    • ${menuItem.menuItemName}
+                    ${menuItem.variantName ? ` (${menuItem.variantName})` : ''}
+                    <span style="color:#28a745;margin-left:8px;">x${menuItem.quantity}</span>
+                  </div>
+                `).join('') : '<div style="font-size:0.85em;margin-left:8px;color:#666;">Loading included items...</div>'}
+              </div>
+            ` : ''}
           </li>
         `).join('')}
       </ul>
@@ -394,7 +438,7 @@ function renderClubDetail(club, tickets, menu, events) {
                     </div>
                     <div class="menu-item-content">
               <span class="menu-id">ID: ${item.id || 'N/A'}</span>
-              <div><b>${item.name}</b> - $${item.price ?? ''}</div>
+              <div><b>${item.name}</b> - ${renderPrice(item.price, item.dynamicPrice)}</div>
               <div>${item.description || ''}</div>
               ${item.variants && item.variants.length ? `
                 <div style="margin-top:6px;">
@@ -403,7 +447,7 @@ function renderClubDetail(club, tickets, menu, events) {
                     ${item.variants.map(variant => `
                       <li class="variant-item">
                         <span class="variant-id">ID: ${variant.id || 'N/A'}</span>
-                        <div><b>${variant.name}</b> - $${variant.price}</div>
+                        <div><b>${variant.name}</b> - ${renderPrice(variant.price, variant.dynamicPrice)}</div>
                       </li>
                     `).join('')}
                   </ul>
@@ -413,7 +457,7 @@ function renderClubDetail(club, tickets, menu, events) {
                   </div>
                 ` : `
                   <span class="menu-id">ID: ${item.id || 'N/A'}</span>
-                  <div><b>${item.name}</b> - $${item.price ?? ''}</div>
+                  <div><b>${item.name}</b> - ${renderPrice(item.price, item.dynamicPrice)}</div>
                   <div>${item.description || ''}</div>
                   ${item.variants && item.variants.length ? `
                     <div style="margin-top:6px;">
@@ -422,7 +466,7 @@ function renderClubDetail(club, tickets, menu, events) {
                         ${item.variants.map(variant => `
                           <li class="variant-item">
                             <span class="variant-id">ID: ${variant.id || 'N/A'}</span>
-                            <div><b>${variant.name}</b> - $${variant.price}</div>
+                            <div><b>${variant.name}</b> - ${renderPrice(variant.price, variant.dynamicPrice)}</div>
             </li>
           `).join('')}
                       </ul>

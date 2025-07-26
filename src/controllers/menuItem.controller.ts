@@ -8,6 +8,7 @@ import { MenuPurchase } from "../entities/MenuPurchase";
 import { Club } from "../entities/Club";
 import { AuthenticatedRequest } from "../types/express";
 import { sanitizeInput } from "../utils/sanitizeInput";
+import { computeDynamicPrice } from "../utils/dynamicPricing";
 
 export const createMenuItem = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
@@ -183,20 +184,51 @@ export const updateMenuItem = async (req: AuthenticatedRequest, res: Response): 
 export const getAllMenuItems = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const repo = AppDataSource.getRepository(MenuItem);
+    const clubRepo = AppDataSource.getRepository(Club);
     const items = await repo.find({
       where: { isActive: true, isDeleted: false },
-      relations: ["variants"],
+      relations: ["variants", "club"],
       order: { name: "ASC" },
     });
 
     // Filter out inactive and soft-deleted variants
-    items.forEach(item => {
+    const itemsWithDynamic = await Promise.all(items.map(async item => {
       if (item.variants) {
         item.variants = item.variants.filter(v => v.isActive && !v.isDeleted);
       }
-    });
-
-    res.json(items);
+      const club = item.club || (await clubRepo.findOne({ where: { id: item.clubId } }));
+      let dynamicPrice = null;
+      if (item.dynamicPricingEnabled && !item.hasVariants && club) {
+        dynamicPrice = computeDynamicPrice({
+          basePrice: Number(item.price),
+          clubOpenDays: club.openDays,
+          openHours: club.openHours,
+        });
+      }
+      let variants = item.variants;
+      if (item.hasVariants && variants && club) {
+        variants = variants.map(variant => {
+          let vDynamicPrice = variant.price;
+          if (variant.dynamicPricingEnabled) {
+            vDynamicPrice = computeDynamicPrice({
+              basePrice: Number(variant.price),
+              clubOpenDays: club.openDays,
+              openHours: club.openHours,
+            });
+          }
+          return {
+            ...variant,
+            dynamicPrice: vDynamicPrice,
+          };
+        });
+      }
+      return {
+        ...item,
+        dynamicPrice,
+        variants,
+      };
+    }));
+    res.json(itemsWithDynamic);
   } catch (err) {
     console.error("Error fetching all menu items:", err);
     res.status(500).json({ error: "Failed to load menu items" });
@@ -336,6 +368,8 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
     try {
       const { clubId } = req.params;
       const repo = AppDataSource.getRepository(MenuItem);
+      const clubRepo = AppDataSource.getRepository(Club);
+      const club = await clubRepo.findOne({ where: { id: clubId } });
 
           const items = await repo.find({
       where: {
@@ -358,7 +392,40 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
         }
       });
 
-      res.json(items);
+      const itemsWithDynamic = items.map(item => {
+        let dynamicPrice = null;
+        if (item.dynamicPricingEnabled && !item.hasVariants && club) {
+          dynamicPrice = computeDynamicPrice({
+            basePrice: Number(item.price),
+            clubOpenDays: club.openDays,
+            openHours: club.openHours,
+          });
+        }
+        let variants = item.variants;
+        if (item.hasVariants && variants && club) {
+          variants = variants.map(variant => {
+            let vDynamicPrice = variant.price;
+            if (variant.dynamicPricingEnabled) {
+              vDynamicPrice = computeDynamicPrice({
+                basePrice: Number(variant.price),
+                clubOpenDays: club.openDays,
+                openHours: club.openHours,
+              });
+            }
+            return {
+              ...variant,
+              dynamicPrice: vDynamicPrice,
+            };
+          });
+        }
+        return {
+          ...item,
+          dynamicPrice,
+          variants,
+        };
+      });
+
+      res.json(itemsWithDynamic);
     } catch (err) {
       console.error("Error loading menu for club:", err);
       res.status(500).json({ error: "Failed to load club menu" });
@@ -369,6 +436,8 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
   try {
     const { clubId } = req.params;
     const repo = AppDataSource.getRepository(MenuItem);
+    const clubRepo = AppDataSource.getRepository(Club);
+    const club = await clubRepo.findOne({ where: { id: clubId } });
 
     const items = await repo.find({
       where: {
@@ -388,7 +457,14 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
 
     items.forEach(item => {
       const variants = item.variants?.filter(v => v.isActive && !v.isDeleted) ?? [];
-
+      let dynamicPrice = null;
+      if (item.dynamicPricingEnabled && !item.hasVariants && club) {
+        dynamicPrice = computeDynamicPrice({
+          basePrice: Number(item.price),
+          clubOpenDays: club.openDays,
+          openHours: club.openHours,
+        });
+      }
       const publicItem = {
         id: item.id,
         name: item.name,
@@ -396,12 +472,25 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
         imageUrl: item.imageUrl,
         price: item.hasVariants ? null : item.price,
         dynamicPricingEnabled: item.dynamicPricingEnabled,
+        dynamicPrice,
         variants: item.hasVariants
-          ? variants.map(v => ({
-              id: v.id,
-              name: v.name,
-              price: v.price
-            }))
+          ? variants.map(v => {
+              let vDynamicPrice = v.price;
+              if (v.dynamicPricingEnabled && club) {
+                vDynamicPrice = computeDynamicPrice({
+                  basePrice: Number(v.price),
+                  clubOpenDays: club.openDays,
+                  openHours: club.openHours,
+                });
+              }
+              return {
+                id: v.id,
+                name: v.name,
+                price: v.price,
+                dynamicPricingEnabled: v.dynamicPricingEnabled,
+                dynamicPrice: vDynamicPrice,
+              };
+            })
           : [],
       };
 

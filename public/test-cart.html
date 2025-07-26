@@ -19,7 +19,7 @@
     }
 
     .container {
-      max-width: 800px;
+      max-width: 1200px;
       margin: 0 auto;
       background: white;
       border-radius: 15px;
@@ -168,6 +168,21 @@
       transform: translateY(-2px);
     }
 
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #c82333;
+      transform: translateY(-2px);
+    }
+
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 0.8rem;
+    }
+
     .output {
       background: #f8f9fa;
       border: 1px solid #e1e5e9;
@@ -219,80 +234,621 @@
       color: #0c5460;
       border: 1px solid #bee5eb;
     }
+
+    /* Cart Display Styles */
+    .cart-display {
+      background: #fff;
+      border: 2px solid #e1e5e9;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .cart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #e1e5e9;
+    }
+
+    .cart-title {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #333;
+    }
+
+    .cart-summary {
+      display: flex;
+      gap: 20px;
+      font-weight: 600;
+    }
+
+    .cart-item {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto auto auto;
+      gap: 15px;
+      align-items: center;
+      padding: 15px;
+      margin-bottom: 10px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      border: 1px solid #e1e5e9;
+    }
+
+    .cart-item-header {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto auto auto;
+      gap: 15px;
+      padding: 10px 15px;
+      background: #667eea;
+      color: white;
+      border-radius: 8px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .item-name {
+      font-weight: 600;
+      color: #333;
+    }
+
+    .item-type {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .item-type.ticket {
+      background: #28a745;
+      color: white;
+    }
+
+    .item-type.menu {
+      background: #ffc107;
+      color: #212529;
+    }
+
+    .item-quantity {
+      text-align: center;
+      font-weight: 600;
+    }
+
+    .item-price {
+      text-align: right;
+      font-weight: 600;
+    }
+
+    .price-display {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 2px;
+    }
+
+    .base-price {
+      color: #6c757d;
+      text-decoration: line-through;
+      font-size: 0.9rem;
+    }
+
+    .dynamic-price {
+      color: #a78bfa;
+      font-weight: bold;
+      font-size: 1.1rem;
+    }
+
+    .no-discount {
+      color: #333;
+      font-weight: bold;
+    }
+
+    .item-total {
+      text-align: right;
+      font-weight: bold;
+      color: #28a745;
+    }
+
+    .item-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .quantity-controls {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .quantity-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 4px;
+      background: #667eea;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.2s;
+    }
+
+    .quantity-btn:hover {
+      background: #5a67d8;
+    }
+
+    .quantity-btn:disabled {
+      background: #cbd5e0;
+      cursor: not-allowed;
+    }
+
+    .quantity-display {
+      min-width: 30px;
+      text-align: center;
+      font-weight: 600;
+      padding: 0 5px;
+    }
+
+    .delete-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 4px;
+      background: #dc3545;
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.2s;
+    }
+
+    .delete-btn:hover {
+      background: #c82333;
+    }
+
+    .cart-total {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 20px;
+      padding: 15px;
+      background: #e8f5e8;
+      border-radius: 8px;
+      margin-top: 15px;
+      font-size: 1.2rem;
+      font-weight: bold;
+    }
+
+    .empty-cart {
+      text-align: center;
+      padding: 40px;
+      color: #6c757d;
+      font-style: italic;
+    }
+
+    /* Linked Items Styles */
+    .linked-items {
+      margin-top: 10px;
+      padding: 10px;
+      background: #f0f8ff;
+      border: 1px solid #b3d9ff;
+      border-radius: 6px;
+      margin-left: 20px;
+    }
+
+    .linked-items-header {
+      font-weight: 600;
+      color: #0066cc;
+      margin-bottom: 8px;
+      font-size: 0.9rem;
+    }
+
+    .linked-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      font-size: 0.85rem;
+    }
+
+    .linked-item-name {
+      font-weight: 500;
+      color: #333;
+    }
+
+    .linked-item-variant {
+      color: #666;
+      font-style: italic;
+    }
+
+    .linked-item-quantity {
+      background: #28a745;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-left: auto;
+    }
+
+    .cart-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    /* Club Content Styles */
+    .club-content {
+      background: #fff;
+      border: 2px solid #e1e5e9;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+
+    .club-info {
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid #e1e5e9;
+    }
+
+    .club-name {
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #333;
+      margin-bottom: 5px;
+    }
+
+    .club-address {
+      color: #666;
+      font-size: 1rem;
+    }
+
+    .items-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .items-section {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 15px;
+    }
+
+    .items-section h3 {
+      color: #333;
+      margin-bottom: 15px;
+      font-size: 1.2rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .item-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .item-card {
+      background: white;
+      border: 1px solid #e1e5e9;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 10px;
+      transition: box-shadow 0.2s;
+    }
+
+    .item-card:hover {
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .item-card.small {
+      padding: 8px;
+      margin-bottom: 6px;
+      font-size: 0.9rem;
+    }
+    
+    .item-card.small .item-id {
+      font-size: 0.7rem;
+      margin-bottom: 2px;
+    }
+    
+    .item-card.small .item-name {
+      font-size: 0.95rem;
+      margin-bottom: 3px;
+    }
+    
+    .item-card.small .item-description {
+      font-size: 0.8rem;
+      margin-bottom: 3px;
+    }
+    
+    .item-card.small .item-price {
+      font-size: 0.9rem;
+      margin-bottom: 3px;
+    }
+    
+    .item-card.small .item-details {
+      font-size: 0.75rem;
+      margin-bottom: 6px;
+    }
+    
+    .item-card.small .add-to-cart-btn {
+      font-size: 0.8rem;
+      padding: 4px 8px;
+    }
+
+    .item-id {
+      font-size: 0.8rem;
+      color: #667eea;
+      margin-bottom: 4px;
+    }
+
+    .item-name {
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 4px;
+    }
+
+    .item-description {
+      color: #666;
+      font-size: 0.9rem;
+      margin-bottom: 8px;
+    }
+
+    .item-price {
+      font-weight: bold;
+      color: #28a745;
+      margin-bottom: 8px;
+    }
+
+    .item-details {
+      font-size: 0.85rem;
+      color: #666;
+      margin-bottom: 8px;
+    }
+
+    .add-to-cart-btn {
+      width: 100%;
+      padding: 8px 12px;
+      background: #28a745;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .add-to-cart-btn:hover {
+      background: #218838;
+    }
+
+    .add-to-cart-btn:disabled {
+      background: #6c757d;
+      cursor: not-allowed;
+    }
+
+    .loading {
+      text-align: center;
+      color: #667eea;
+      padding: 20px;
+      font-style: italic;
+    }
+
+    .no-items {
+      text-align: center;
+      color: #6c757d;
+      padding: 20px;
+      font-style: italic;
+    }
+
+    @media (max-width: 768px) {
+      .items-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    /* Date Picker Modal Styles */
+    .date-picker-modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.5);
+    }
+    
+    .date-picker-content {
+      background-color: white;
+      margin: 15% auto;
+      padding: 20px;
+      border-radius: 8px;
+      width: 90%;
+      max-width: 400px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    .date-picker-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    
+    .date-picker-title {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #333;
+    }
+    
+    .date-picker-close {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      cursor: pointer;
+      color: #666;
+    }
+    
+    .date-picker-close:hover {
+      color: #333;
+    }
+    
+    .date-picker-form {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+    
+    .date-picker-form label {
+      font-weight: 600;
+      color: #333;
+    }
+    
+    .date-picker-form input[type="date"] {
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 1rem;
+    }
+    
+    .date-picker-buttons {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 20px;
+    }
+    
+    .date-picker-cancel {
+      padding: 8px 16px;
+      background: #6c757d;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    
+    .date-picker-confirm {
+      padding: 8px 16px;
+      background: #28a745;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    
+    .date-picker-cancel:hover {
+      background: #5a6268;
+    }
+    
+    .date-picker-confirm:hover {
+      background: #218838;
+    }
   </style>
 </head>
 <body>
+  <!-- Date Picker Modal -->
+  <div id="datePickerModal" class="date-picker-modal">
+    <div class="date-picker-content">
+      <div class="date-picker-header">
+        <div class="date-picker-title">Select Date for Ticket</div>
+        <button class="date-picker-close" id="datePickerClose">&times;</button>
+      </div>
+      <form class="date-picker-form" id="datePickerForm">
+        <div>
+          <label for="ticketDate">Date:</label>
+          <input type="date" id="ticketDate" required>
+        </div>
+        <div class="date-picker-buttons">
+          <button type="button" class="date-picker-cancel" id="datePickerCancel">Cancel</button>
+          <button type="submit" class="date-picker-confirm" id="datePickerConfirm">Add to Cart</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div class="container">
     <div style="padding: 20px 0 0 30px;">
       <button id="returnToLoginBtn" class="btn btn-primary">🔙 Return to Login</button>
     </div>
     <div class="header">
       <h1>🛒 NightLife Cart</h1>
-      <p>Add tickets and menu items to your cart</p>
+      <p>Browse clubs and add items to your cart</p>
     </div>
 
     <div class="content">
-      <!-- Cart Type Selection -->
+      <!-- Club Selector -->
       <div class="section">
-        <h2>📋 Cart Type</h2>
-        <div class="radio-group">
-          <label>
-            <input type="radio" name="cartType" value="ticket" checked />
-            🎫 Ticket
-          </label>
-          <label>
-            <input type="radio" name="cartType" value="menu" />
-            🍽️ Menu Item
-          </label>
-        </div>
-      </div>
-
-      <!-- Ticket Fields -->
-      <div id="ticketFields" class="section">
-        <h2>🎫 Ticket Details</h2>
-        <div class="fields-container">
-          <div class="form-group">
-            <label for="ticketId">Ticket ID:</label>
-            <input id="ticketId" type="text" placeholder="Enter ticket ID" />
-          </div>
-          <div class="form-group">
-            <label for="ticketDate">Date:</label>
-            <input id="ticketDate" type="date" />
-          </div>
-        </div>
-      </div>
-
-      <!-- Menu Fields -->
-      <div id="menuFields" class="section hidden">
-        <h2>🍽️ Menu Item Details</h2>
-        <div class="fields-container">
-          <div class="form-group">
-            <label for="menuItemId">Menu Item ID:</label>
-            <input id="menuItemId" type="text" placeholder="Enter menu item ID" />
-          </div>
-          <div class="form-group">
-            <label for="variantId">Variant ID (optional):</label>
-            <input id="variantId" type="text" placeholder="Enter variant ID if applicable" />
-          </div>
-        </div>
-      </div>
-
-      <!-- Quantity -->
-      <div class="section">
-        <h2>📦 Quantity</h2>
+        <h2>🏢 Select Club</h2>
         <div class="form-group">
-          <label for="quantity">Quantity:</label>
-          <input id="quantity" type="number" min="1" value="1" />
+          <label for="clubSelector">Choose a club:</label>
+          <select id="clubSelector">
+            <option value="">Select a club...</option>
+          </select>
+        </div>
+        <button id="loadClubBtn" class="btn btn-primary">📋 Load Club Details</button>
+      </div>
+
+      <!-- Club Content -->
+      <div id="clubContent" class="club-content hidden">
+        <div class="club-info">
+          <div class="club-name" id="clubName"></div>
+          <div class="club-address" id="clubAddress"></div>
+        </div>
+        
+        <div class="items-grid">
+          <!-- Regular Tickets Section -->
+          <div class="items-section">
+            <h3>🎫 Regular Tickets</h3>
+            <div id="ticketsList" class="loading">Loading tickets...</div>
+          </div>
+
+          <!-- Menu Items Section -->
+          <div class="items-section">
+            <h3>🍽️ Menu Items</h3>
+            <div id="menuItemsList" class="loading">Loading menu items...</div>
+          </div>
+        </div>
+
+        <!-- Events Section -->
+        <div class="items-section" style="margin-top: 20px;">
+          <h3>🎉 Events & Event Tickets</h3>
+          <div id="eventsList" class="loading">Loading events...</div>
+        </div>
+      </div>
+
+      <!-- Cart Display -->
+      <div class="section cart-display">
+        <div class="cart-header">
+          <div class="cart-title">🛒 Your Cart</div>
+          <div class="cart-summary">
+            <span id="cartItemCount">0 items</span>
+            <span id="cartTotal">Total: $0.00</span>
+          </div>
+        </div>
+        
+        <div id="cartItemsContainer">
+          <div class="empty-cart">Your cart is empty. Add some items to get started!</div>
         </div>
       </div>
 
       <!-- Cart Actions -->
       <div class="section">
         <h2>🛒 Cart Actions</h2>
-        <button id="addBtn" class="btn btn-primary">➕ Add to Cart</button>
         <button id="viewBtn" class="btn btn-secondary">👁️ View Cart</button>
-        <button id="updateBtn" class="btn btn-warning">✏️ Update Item</button>
-        <button id="removeBtn" class="btn btn-secondary">🗑️ Remove Item</button>
+        <button id="clearBtn" class="btn btn-secondary">🗑️ Clear Cart</button>
       </div>
 
       <!-- Email Section -->
@@ -320,11 +876,11 @@
       <!-- Output -->
       <div class="section">
         <h2>📊 Response</h2>
-        <pre id="output" class="output">Ready to add items to cart...</pre>
+        <pre id="output" class="output">Ready to browse clubs...</pre>
       </div>
     </div>
   </div>
 
-  <script src="test-cart.js"></script>
+      <script src="test-cart.js?"></script>
 </body>
 </html>

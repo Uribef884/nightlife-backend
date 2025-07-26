@@ -3,6 +3,8 @@ import { AppDataSource } from "../config/data-source";
 import { Event } from "../entities/Event";
 import { AuthenticatedRequest } from "../types/express";
 import { Ticket } from "../entities/Ticket";
+import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
+import { computeDynamicPrice } from "../utils/dynamicPricing";
 
 // GET /events — public
 export const getAllEvents = async (req: Request, res: Response) => {
@@ -21,12 +23,115 @@ export const getEventsByClubId = async (req: Request, res: Response) => {
   try {
     const { clubId } = req.params;
     const eventRepo = AppDataSource.getRepository(Event);
+    const ticketIncludedMenuRepo = AppDataSource.getRepository(TicketIncludedMenuItem);
+    
     const events = await eventRepo.find({
       where: { clubId },
       relations: ["club", "tickets"],
       order: { availableDate: "ASC", createdAt: "DESC" }
     });
-    res.status(200).json(events);
+    
+    // Apply dynamic pricing to event tickets and fetch included menu items
+    const eventsWithDynamicPricing = await Promise.all(events.map(async event => {
+      if (event.tickets && event.tickets.length > 0) {
+        const ticketsWithDynamic = await Promise.all(event.tickets.map(async ticket => {
+          let dynamicPrice = ticket.price;
+          
+          if (ticket.dynamicPricingEnabled && event.club) {
+            // For events, we want to use the event's date and open hours
+            // The event date + open hours becomes our "open time" reference
+            if (event.openHours && event.openHours.open && event.openHours.close) {
+              // Create a date object for when the event opens
+              // Parse the event date properly to avoid timezone issues
+              let eventDate: Date;
+              
+              // Handle availableDate which can be Date or string from database
+              if (event.availableDate instanceof Date) {
+                eventDate = new Date(event.availableDate);
+              } else if (typeof event.availableDate === 'string') {
+                // If it's a date string like "2025-07-25", parse it as local date
+                const dateStr = event.availableDate as string;
+                const [year, month, day] = dateStr.split('-').map(Number);
+                eventDate = new Date(year, month - 1, day); // month is 0-indexed
+              } else {
+                // Fallback
+                eventDate = new Date(event.availableDate);
+              }
+              
+              const [openHour, openMinute] = event.openHours.open.split(':').map(Number);
+              
+              // Create the event open time in local timezone
+              const eventOpenTime = new Date(
+                eventDate.getFullYear(),
+                eventDate.getMonth(),
+                eventDate.getDate(),
+                openHour,
+                openMinute,
+                0,
+                0
+              );
+              
+              // Use the event's open time as the reference for dynamic pricing
+              dynamicPrice = computeDynamicPrice({
+                basePrice: Number(ticket.price),
+                clubOpenDays: event.club.openDays,
+                openHours: event.club.openHours, // Fallback to club hours if needed
+                availableDate: eventOpenTime, // Use event's open time as the reference
+                useDateBasedLogic: true, // Use date-based logic with event's open time
+              });
+            } else {
+              // Fallback to club's open hours if event doesn't have specific hours
+              dynamicPrice = computeDynamicPrice({
+                basePrice: Number(ticket.price),
+                clubOpenDays: event.club.openDays,
+                openHours: event.club.openHours,
+                availableDate: event.availableDate,
+                useDateBasedLogic: true, // Use date-based logic with event date
+              });
+            }
+          }
+          
+          // Fetch included menu items if this ticket includes them
+          let includedMenuItems: Array<{
+            id: string;
+            menuItemId: string;
+            menuItemName: string;
+            variantId?: string;
+            variantName: string | null;
+            quantity: number;
+          }> = [];
+          
+          if (ticket.includesMenuItem) {
+            const includedItems = await ticketIncludedMenuRepo.find({
+              where: { ticketId: ticket.id },
+              relations: ["menuItem", "variant"]
+            });
+            
+            includedMenuItems = includedItems.map(item => ({
+              id: item.id,
+              menuItemId: item.menuItemId,
+              menuItemName: item.menuItem?.name || 'Unknown Item',
+              variantId: item.variantId,
+              variantName: item.variant?.name || null,
+              quantity: item.quantity
+            }));
+          }
+          
+          return {
+            ...ticket,
+            dynamicPrice,
+            includedMenuItems,
+          };
+        }));
+        return {
+          ...event,
+          tickets: ticketsWithDynamic,
+        };
+      }
+      return event;
+    }));
+    
+    res.status(200).json(eventsWithDynamicPricing);
   } catch (err) {
     console.error("❌ Failed to fetch events by club:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -76,7 +181,7 @@ export const getMyClubEvents = async (req: AuthenticatedRequest, res: Response):
 // POST /events — clubOwner only
 export const createEvent = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { name, description, availableDate } = req.body;
+    const { name, description, availableDate, openHours } = req.body;
     const user = req.user;
 
     if (!user || !user.clubId) {
@@ -93,6 +198,19 @@ export const createEvent = async (req: AuthenticatedRequest, res: Response): Pro
     if (!req.file) {
       res.status(400).json({ error: "Image file is required." });
       return;
+    }
+
+    // Parse openHours if provided
+    let parsedOpenHours = null;
+    if (openHours && typeof openHours === 'string') {
+      try {
+        parsedOpenHours = JSON.parse(openHours);
+      } catch (error) {
+        res.status(400).json({ error: "Invalid openHours format. Must be valid JSON." });
+        return;
+      }
+    } else if (openHours && typeof openHours === 'object') {
+      parsedOpenHours = openHours;
     }
 
     // 🔒 Normalize date using same pattern as checkout.ts
@@ -122,6 +240,7 @@ export const createEvent = async (req: AuthenticatedRequest, res: Response): Pro
       name: name.trim(),
       description: description?.trim() || null,
       availableDate: normalizedDate,
+      openHours: parsedOpenHours,
       bannerUrl: "", // will be set after upload
       BannerURLBlurHash: processed.blurhash,
       clubId: user.clubId,
@@ -234,7 +353,7 @@ export const deleteEvent = async (req: AuthenticatedRequest, res: Response) => {
 export const updateEvent = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { name, description, availableDate } = req.body;
+    const { name, description, availableDate, openHours } = req.body;
     const user = req.user;
 
     if (!user || !user.clubId) {
@@ -259,6 +378,22 @@ export const updateEvent = async (req: AuthenticatedRequest, res: Response): Pro
     if (event.clubId !== user.clubId) {
       res.status(403).json({ error: "Forbidden: You cannot update events from another club" });
       return;
+    }
+
+    // Parse openHours if provided
+    if (openHours !== undefined) {
+      let parsedOpenHours = null;
+      if (openHours && typeof openHours === 'string') {
+        try {
+          parsedOpenHours = JSON.parse(openHours);
+        } catch (error) {
+          res.status(400).json({ error: "Invalid openHours format. Must be valid JSON." });
+          return;
+        }
+      } else if (openHours && typeof openHours === 'object') {
+        parsedOpenHours = openHours;
+      }
+      event.openHours = parsedOpenHours;
     }
 
     // Update fields

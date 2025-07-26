@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { MenuCategory } from "../entities/MenuCategory";
 import { MenuItem } from "../entities/MenuItem";
-// import { computeDynamicPrice } from "../utils/dynamicPricing";
+import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { sanitizeInput } from "../utils/sanitizeInput";
 import { AuthenticatedRequest } from "../types/express";
 
@@ -17,8 +17,57 @@ export const getAllMenuCategories = async (req: Request, res: Response) => {
       categories.map(async (category) => {
         const menuItemsWithPrice = await Promise.all(
           category.items.map(async (item: MenuItem) => {
-            // const dynamicPrice = computeDynamicPrice({basePrice: item.hasVariants ? 0 : item.price!, clubOpenDays: item.club.openDays, openHours: item.club.openHours });
-            return { ...item, dynamicPrice: null }; // Commented out dynamic pricing
+            const club = item.club;
+            let basePrice = item.hasVariants ? 0 : Number(item.price!);
+            
+            // For items with variants, we'll show dynamic pricing for each variant
+            let dynamicPrice = null;
+            let discountApplied = 0;
+            
+            if (item.dynamicPricingEnabled && !item.hasVariants) {
+              dynamicPrice = computeDynamicPrice({
+                basePrice,
+                clubOpenDays: club.openDays,
+                openHours: Array.isArray(club.openHours) && club.openHours.length > 0 ? club.openHours[0].open + '-' + club.openHours[0].close : "",
+              });
+              discountApplied = Math.max(0, Math.round((basePrice - dynamicPrice) * 100) / 100);
+            }
+            
+            // For items with variants, add dynamic pricing to each variant
+            if (item.hasVariants && item.variants) {
+              item.variants = item.variants.map(variant => {
+                if (variant.dynamicPricingEnabled) {
+                  const variantBasePrice = Number(variant.price);
+                  const variantDynamicPrice = computeDynamicPrice({
+                    basePrice: variantBasePrice,
+                    clubOpenDays: club.openDays,
+                    openHours: Array.isArray(club.openHours) && club.openHours.length > 0 ? club.openHours[0].open + '-' + club.openHours[0].close : "",
+                  });
+                  const variantDiscountApplied = Math.max(0, Math.round((variantBasePrice - variantDynamicPrice) * 100) / 100);
+                  
+                  return {
+                    ...variant,
+                    basePrice: variantBasePrice,
+                    dynamicPrice: variantDynamicPrice,
+                    discountApplied: variantDiscountApplied
+                  };
+                } else {
+                  return {
+                    ...variant,
+                    basePrice: Number(variant.price),
+                    dynamicPrice: Number(variant.price),
+                    discountApplied: 0
+                  };
+                }
+              });
+            }
+            
+            return { 
+              ...item, 
+              basePrice,
+              dynamicPrice, 
+              discountApplied 
+            };
           })
         );
         return { ...category, items: menuItemsWithPrice };

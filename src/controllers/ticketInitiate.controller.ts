@@ -7,6 +7,7 @@ import { processSuccessfulCheckout } from "./ticketCheckout.controller";
 import { issueMockTransaction, mockValidateWompiTransaction } from "../services/mockWompiService";
 import { differenceInMinutes } from "date-fns"; // 🆕 For TTL logic
 import { AuthenticatedRequest } from "../types/express";
+import { computeDynamicPrice, computeDynamicEventPrice } from "../utils/dynamicPricing";
 
 export const initiateMockCheckout = async (req: Request, res: Response) => {
   const typedReq = req as AuthenticatedRequest;
@@ -70,10 +71,30 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
 
   let total = 0;
   for (const item of cartItems) {
-    const price = Number(item.ticket.price);
-    const platformFee = calculatePlatformFee(price, 0.05);
-    const { totalGatewayFee, iva } = calculateGatewayFees(price);
-    const finalPerUnit = price + platformFee + totalGatewayFee + iva;
+    const ticket = item.ticket;
+    const basePrice = Number(ticket.price);
+    
+    // Compute dynamic price based on ticket type and settings
+    let dynamicPrice = basePrice;
+    
+    if (ticket.dynamicPricingEnabled) {
+      if (ticket.category === "event" && ticket.availableDate) {
+        // Event ticket - use date-based dynamic pricing
+        dynamicPrice = computeDynamicEventPrice(basePrice, new Date(ticket.availableDate));
+      } else {
+        // General ticket - use time-based dynamic pricing
+        dynamicPrice = computeDynamicPrice({
+          basePrice,
+          clubOpenDays: ticket.club.openDays,
+          openHours: Array.isArray(ticket.club.openHours) && ticket.club.openHours.length > 0 ? ticket.club.openHours[0].open + '-' + ticket.club.openHours[0].close : "",
+        });
+      }
+    }
+    
+    // Calculate fees based on the dynamic price
+    const platformFee = calculatePlatformFee(dynamicPrice, 0.05);
+    const { totalGatewayFee, iva } = calculateGatewayFees(dynamicPrice);
+    const finalPerUnit = dynamicPrice + platformFee + totalGatewayFee + iva;
     total += finalPerUnit * item.quantity;
   }
 

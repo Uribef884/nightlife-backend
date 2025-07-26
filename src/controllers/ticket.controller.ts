@@ -9,6 +9,7 @@ import { TicketCategory } from "../entities/Ticket";
 import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
 import { MenuItem } from "../entities/MenuItem";
 import { MenuItemVariant } from "../entities/MenuItemVariant";
+import { computeDynamicPrice } from "../utils/dynamicPricing";
 
 // Utility to normalize today's date
 const getTodayISO = (): string => {
@@ -132,6 +133,11 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
 
     let dynamicPricing = false;
     if (category === TicketCategory.FREE || price == 0) {
+      if (dynamicPricingEnabled) {
+        res.status(400).json({ error: "Dynamic pricing cannot be enabled for free tickets. Free tickets must always have a fixed price of 0." });
+        await queryRunner.rollbackTransaction();
+        return;
+      }
       dynamicPricing = false;
     } else {
       dynamicPricing = !!dynamicPricingEnabled;
@@ -433,17 +439,61 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
 export async function getAllTickets(req: Request, res: Response): Promise<void> {
   try {
     const repo = AppDataSource.getRepository(Ticket);
+    const clubRepo = AppDataSource.getRepository(Club);
+    const ticketIncludedMenuRepo = AppDataSource.getRepository(TicketIncludedMenuItem);
+    
     const tickets = await repo.find({
       where: { isActive: true, isDeleted: false },
       relations: ["club"],
       order: { priority: "ASC" },
     });
-
-    const formatted = tickets.map((t) => ({
-      ...t,
-      soldOut: t.quantity !== null && t.quantity === 0,
+    
+    const formatted = await Promise.all(tickets.map(async (t) => {
+      const club = t.club || (await clubRepo.findOne({ where: { id: t.clubId } }));
+      let dynamicPrice = t.price;
+      if (t.dynamicPricingEnabled && club) {
+        dynamicPrice = computeDynamicPrice({
+          basePrice: Number(t.price),
+          clubOpenDays: club.openDays,
+          openHours: club.openHours,
+          availableDate: t.availableDate,
+          useDateBasedLogic: t.category === "event",
+        });
+      }
+      
+      // Fetch included menu items if this ticket includes them
+      let includedMenuItems: Array<{
+        id: string;
+        menuItemId: string;
+        menuItemName: string;
+        variantId?: string;
+        variantName: string | null;
+        quantity: number;
+      }> = [];
+      
+      if (t.includesMenuItem) {
+        const includedItems = await ticketIncludedMenuRepo.find({
+          where: { ticketId: t.id },
+          relations: ["menuItem", "variant"]
+        });
+        
+        includedMenuItems = includedItems.map(item => ({
+          id: item.id,
+          menuItemId: item.menuItemId,
+          menuItemName: item.menuItem?.name || 'Unknown Item',
+          variantId: item.variantId,
+          variantName: item.variant?.name || null,
+          quantity: item.quantity
+        }));
+      }
+      
+      return {
+        ...t,
+        soldOut: t.quantity !== null && t.quantity === 0,
+        dynamicPrice,
+        includedMenuItems,
+      };
     }));
-
     res.json(formatted);
   } catch (error) {
     console.error("❌ Error fetching tickets:", error);
@@ -456,16 +506,61 @@ export async function getTicketsByClub(req: Request, res: Response): Promise<voi
   try {
     const { id } = req.params;
     const repo = AppDataSource.getRepository(Ticket);
+    const clubRepo = AppDataSource.getRepository(Club);
+    const ticketIncludedMenuRepo = AppDataSource.getRepository(TicketIncludedMenuItem);
+    
     const tickets = await repo.find({
       where: { club: { id }, isDeleted: false },
       order: { priority: "ASC" },
+      relations: ["club"],
     });
-
-    const formatted = tickets.map((t) => ({
-      ...t,
-      soldOut: t.quantity !== null && t.quantity === 0,
+    
+    const formatted = await Promise.all(tickets.map(async (t) => {
+      const club = t.club || (await clubRepo.findOne({ where: { id: t.clubId } }));
+      let dynamicPrice = t.price;
+      if (t.dynamicPricingEnabled && club) {
+        dynamicPrice = computeDynamicPrice({
+          basePrice: Number(t.price),
+          clubOpenDays: club.openDays,
+          openHours: club.openHours,
+          availableDate: t.availableDate,
+          useDateBasedLogic: t.category === "event",
+        });
+      }
+      
+      // Fetch included menu items if this ticket includes them
+      let includedMenuItems: Array<{
+        id: string;
+        menuItemId: string;
+        menuItemName: string;
+        variantId?: string;
+        variantName: string | null;
+        quantity: number;
+      }> = [];
+      
+      if (t.includesMenuItem) {
+        const includedItems = await ticketIncludedMenuRepo.find({
+          where: { ticketId: t.id },
+          relations: ["menuItem", "variant"]
+        });
+        
+        includedMenuItems = includedItems.map(item => ({
+          id: item.id,
+          menuItemId: item.menuItemId,
+          menuItemName: item.menuItem?.name || 'Unknown Item',
+          variantId: item.variantId,
+          variantName: item.variant?.name || null,
+          quantity: item.quantity
+        }));
+      }
+      
+      return {
+        ...t,
+        soldOut: t.quantity !== null && t.quantity === 0,
+        dynamicPrice,
+        includedMenuItems,
+      };
     }));
-
     res.json(formatted);
   } catch (error) {
     console.error("❌ Error fetching tickets:", error);
@@ -481,30 +576,37 @@ export async function getTicketById(req: AuthenticatedRequest, res: Response): P
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
-
     const ticketRepo = AppDataSource.getRepository(Ticket);
+    const clubRepo = AppDataSource.getRepository(Club);
     const { id } = req.params;
-
     const ticket = await ticketRepo.findOne({ 
       where: { id, isDeleted: false }, 
       relations: ["club"] 
     });
-
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
       return;
     }
-
     if (user.role === "clubowner" && ticket.club.ownerId !== user.id) {
       res.status(403).json({ error: "Forbidden: This ticket doesn't belong to your club" });
       return;
     }
-
+    const club = ticket.club || (await clubRepo.findOne({ where: { id: ticket.clubId } }));
+    let dynamicPrice = ticket.price;
+    if (ticket.dynamicPricingEnabled && club) {
+      dynamicPrice = computeDynamicPrice({
+        basePrice: Number(ticket.price),
+        clubOpenDays: club.openDays,
+        openHours: club.openHours,
+        availableDate: ticket.availableDate,
+        useDateBasedLogic: ticket.category === "event",
+      });
+    }
     const response = {
       ...ticket,
       soldOut: ticket.quantity !== null && ticket.quantity === 0,
+      dynamicPrice,
     };
-
     res.status(200).json(response);
   } catch (error) {
     console.error("❌ Error fetching ticket by ID:", error);
@@ -664,15 +766,15 @@ export const toggleTicketDynamicPricing = async (req: Request, res: Response): P
     }
 
     // Prevent enabling dynamic pricing for free tickets
-    if ((ticket.category === TicketCategory.FREE || ticket.price === 0) && !ticket.dynamicPricingEnabled) {
-      res.status(400).json({ error: "Dynamic pricing cannot be enabled for free tickets." });
-      return;
-    }
-    if ((ticket.category === TicketCategory.FREE || ticket.price === 0) && ticket.dynamicPricingEnabled) {
+    if ((ticket.category === TicketCategory.FREE || ticket.price === 0)) {
+      if (!ticket.dynamicPricingEnabled && req.body?.enable === true) {
+        res.status(400).json({ error: "Dynamic pricing cannot be enabled for free tickets. Free tickets must always have a fixed price of 0." });
+        return;
+      }
       // Allow disabling if currently enabled (shouldn't happen, but for safety)
       ticket.dynamicPricingEnabled = false;
       await repo.save(ticket);
-      res.json({ message: "Ticket dynamic pricing toggled", dynamicPricingEnabled: ticket.dynamicPricingEnabled });
+      res.json({ message: "Dynamic pricing has been disabled for this free ticket. Free tickets must always have a fixed price of 0.", dynamicPricingEnabled: ticket.dynamicPricingEnabled });
       return;
     }
 

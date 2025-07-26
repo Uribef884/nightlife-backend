@@ -2,7 +2,7 @@ import { Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { CartItem } from "../entities/TicketCartItem";
 import { AuthenticatedRequest } from "../types/express";
-// import { computeDynamicPrice } from "../utils/dynamicPricing";
+import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { Ticket } from "../entities/Ticket";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { toZonedTime, format } from "date-fns-tz";
@@ -18,6 +18,12 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
     const { ticketId, date, quantity } = req.body;
     const userId: string | undefined = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
 
     if (!ticketId || !date || quantity == null || quantity <= 0) {
       res.status(400).json({ error: "Missing or invalid fields" });
@@ -107,50 +113,32 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       }
     }
 
-    // const unitPrice = ticket.dynamicPricingEnabled
-    //   ? computeDynamicPrice({
-    //       basePrice: ticket.price,
-    //       clubOpenDays: ticket.club.openDays,
-    //       openHours: ticket.club.openHours,
-    //       availableDate: new Date(`${date}T00:00:00`),
-    //       useDateBasedLogic: !!ticket.eventId
-    //     })
-    //   : ticket.price;
-
-    // if (unitPrice < 0) {
-    //   res.status(400).json({ error: "Invalid ticket pricing configuration" });
-    //   return;
-    // }
-
     const existing = await cartRepo.findOne({
-      where: userId ? { userId, ticketId, date } : { sessionId, ticketId, date }
+      where: { ...whereClause, ticketId, date },
+      relations: ["ticket", "ticket.club"],
     });
 
     if (existing) {
       const newTotal = existing.quantity + quantity;
       if (newTotal > ticket.maxPerPerson) {
-        res.status(400).json({ error: `You can only buy up to ${ticket.maxPerPerson} tickets of this type` });
+        res.status(400).json({ error: `Cannot exceed maximum of ${ticket.maxPerPerson} tickets per person` });
         return;
       }
 
       existing.quantity = newTotal;
-      // existing.unitPrice = unitPrice;
       await cartRepo.save(existing);
       res.status(200).json(existing);
-      return;
+    } else {
+      const newItem = cartRepo.create({
+        ticketId,
+        date,
+        quantity,
+        ...(userId ? { userId } : { sessionId }),
+      });
+
+      await cartRepo.save(newItem);
+      res.status(201).json(newItem);
     }
-
-    const newItem = cartRepo.create({
-      ticketId,
-      ticket,
-      date,
-      quantity,
-      // unitPrice,
-      ...(userId ? { userId } : { sessionId }),
-    });
-
-    await cartRepo.save(newItem);
-    res.status(201).json(newItem);
   } catch (err) {
     console.error("❌ Error adding to ticket cart:", err);
     res.status(500).json({ error: "Internal server error" });
@@ -162,6 +150,12 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
     const { id, quantity } = req.body;
     const userId = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
 
     if (!id || typeof quantity !== "number" || quantity <= 0) {
       res.status(400).json({ error: "Valid ID and quantity are required" });
@@ -215,21 +209,7 @@ export const updateCartItem = async (req: AuthenticatedRequest, res: Response): 
       }
     }
 
-    // const unitPrice = computeDynamicPrice({
-    //   basePrice: ticket.price,
-    //   clubOpenDays: ticket.club.openDays,
-    //   openHours: ticket.club.openHours,
-    //   availableDate: new Date(`${item.date}T00:00:00`),
-    //   useDateBasedLogic: !!ticket.eventId
-    // });
-
-    // if (unitPrice < 0) {
-    //   res.status(400).json({ error: "Invalid ticket pricing configuration" });
-    //   return;
-    // }
-
     item.quantity = quantity;
-    // item.unitPrice = unitPrice;
 
     await cartRepo.save(item);
     res.status(200).json(item);
@@ -244,6 +224,12 @@ export const removeCartItem = async (req: AuthenticatedRequest, res: Response): 
     const { id } = req.params;
     const userId = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
 
     const cartRepo = AppDataSource.getRepository(CartItem);
     const item = await cartRepo.findOneBy({ id });
@@ -271,12 +257,18 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
     const userId = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
+
     const cartRepo = AppDataSource.getRepository(CartItem);
     const whereClause = userId ? { userId } : { sessionId };
 
     const items = await cartRepo.find({
       where: whereClause,
-      relations: ["ticket", "ticket.club"],
+      relations: ["ticket", "ticket.club", "ticket.event"],
       order: { createdAt: "DESC" },
     });
 
@@ -291,6 +283,7 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
         variantName: string | null;
         quantity: number;
       }> = [];
+      
       if (ticket && ticket.includesMenuItem) {
         const repo = AppDataSource.getRepository(TicketIncludedMenuItem);
         const included = await repo.find({
@@ -306,13 +299,89 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
           quantity: i.quantity
         }));
       }
+
+      // Calculate dynamic pricing
+      const basePrice = Number(ticket.price);
+      let dynamicPrice = basePrice;
+      
+      if (ticket.dynamicPricingEnabled && ticket.club) {
+        // For event tickets, use the event date and open hours
+        if (ticket.category === "event" && ticket.availableDate) {
+          // Check if the ticket has an associated event with open hours
+          if (ticket.event && ticket.event.openHours && ticket.event.openHours.open && ticket.event.openHours.close) {
+            // Use event's open hours for dynamic pricing
+            let eventDate: Date;
+            
+            // Handle availableDate which can be Date or string from database
+            if (ticket.availableDate instanceof Date) {
+              eventDate = new Date(ticket.availableDate);
+            } else if (typeof ticket.availableDate === 'string') {
+              // If it's a date string like "2025-07-25", parse it as local date
+              const dateStr = ticket.availableDate as string;
+              const [year, month, day] = dateStr.split('-').map(Number);
+              eventDate = new Date(year, month - 1, day); // month is 0-indexed
+            } else {
+              // Fallback
+              eventDate = new Date(ticket.availableDate);
+            }
+            
+            const [openHour, openMinute] = ticket.event.openHours.open.split(':').map(Number);
+            
+            // Create the event open time in local timezone
+            const eventOpenTime = new Date(
+              eventDate.getFullYear(),
+              eventDate.getMonth(),
+              eventDate.getDate(),
+              openHour,
+              openMinute,
+              0,
+              0
+            );
+            
+            dynamicPrice = computeDynamicPrice({
+              basePrice,
+              clubOpenDays: ticket.club.openDays,
+              openHours: ticket.club.openHours, // Fallback to club hours if needed
+              availableDate: eventOpenTime, // Use event's open time as the reference
+              useDateBasedLogic: true, // Use date-based logic with event's open time
+            });
+          } else {
+            // Fallback to using just the event date
+            dynamicPrice = computeDynamicPrice({
+              basePrice,
+              clubOpenDays: ticket.club.openDays,
+              openHours: ticket.club.openHours,
+              availableDate: ticket.availableDate,
+              useDateBasedLogic: true,
+            });
+          }
+        } else {
+          // For general tickets, use the cart item date
+          dynamicPrice = computeDynamicPrice({
+            basePrice,
+            clubOpenDays: ticket.club.openDays,
+            openHours: ticket.club.openHours,
+            availableDate: new Date(item.date),
+            useDateBasedLogic: false,
+          });
+        }
+      }
+
       return {
         id: item.id,
         ticketId: item.ticketId,
         quantity: item.quantity,
         date: item.date,
-        ticket,
-        menuItems // always include, even if empty
+        ticket: {
+          ...ticket,
+          price: basePrice,
+          dynamicPrice: dynamicPrice
+        },
+        menuItems,
+        includedMenuItems: menuItems, // Add this for frontend compatibility
+        basePrice,
+        dynamicPrice,
+        discountApplied: Math.max(0, basePrice - dynamicPrice)
       };
     }));
 
@@ -327,6 +396,12 @@ export const clearCart = async (req: AuthenticatedRequest, res: Response): Promi
   try {
     const userId = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
 
     const cartRepo = AppDataSource.getRepository(CartItem);
     const whereClause = userId ? { userId } : { sessionId };
@@ -344,6 +419,12 @@ export const clearMenuCartFromTicket = async (req: AuthenticatedRequest, res: Re
   try {
     const userId = req.user?.id;
     const sessionId = !userId ? req.sessionId : undefined;
+
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
 
     const menuCartRepo = AppDataSource.getRepository("menu_cart_item");
     const whereClause = userId ? { userId } : { sessionId };

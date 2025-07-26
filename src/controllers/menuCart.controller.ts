@@ -3,7 +3,7 @@ import { AppDataSource } from "../config/data-source";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { MenuItem } from "../entities/MenuItem";
 import { Club } from "../entities/Club";
-// import { computeDynamicPrice } from "../utils/dynamicPricing";
+import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { AuthenticatedRequest } from "../types/express";
 import { CartItem } from "../entities/TicketCartItem";
 
@@ -18,6 +18,12 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
     const { menuItemId, variantId, quantity } = req.body;
     const userId: string | undefined = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
 
     if (!menuItemId || quantity == null || quantity <= 0) {
       res.status(400).json({ error: "Missing or invalid fields" });
@@ -86,53 +92,31 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
       ? menuItem.variants.find(v => v.id === variantId)?.price ?? 0
       : menuItem.price!;
 
-    // const unitPrice = menuItem.dynamicPricingEnabled
-    //   ? computeDynamicPrice({
-    //       basePrice,
-    //       clubOpenDays: menuItem.club.openDays,
-    //       openHours: menuItem.club.openHours
-    //     })
-    //   : basePrice;
-
-    // if (unitPrice <= 0) {
-    //   res.status(400).json({ error: "Invalid price configuration for this item or variant." });
-    //   return;
-    // }
-
     const where = userId
-      ? { menuItemId, variantId: variantId ?? undefined, userId }
-      : { menuItemId, variantId: variantId ?? undefined, sessionId };
+      ? { userId, menuItemId, variantId: variantId || null }
+      : { sessionId, menuItemId, variantId: variantId || null };
 
     const existing = await cartRepo.findOne({ where });
-    const currentQuantity = existing?.quantity ?? 0;
-    const newTotal = currentQuantity + quantity;
-
-    if (menuItem.maxPerPerson && newTotal > menuItem.maxPerPerson) {
-      res.status(400).json({
-        error: `You can only purchase up to ${menuItem.maxPerPerson} units of this item.`
-      });
-      return;
-    }
 
     if (existing) {
+      const newTotal = existing.quantity + quantity;
       existing.quantity = newTotal;
-      // existing.unitPrice = unitPrice;
       await cartRepo.save(existing);
       res.json(existing);
-      return;
+    } else {
+      const newItem = cartRepo.create({
+        menuItemId,
+        variantId: variantId || null,
+      });
+
+      newItem.userId = userId ?? null;
+      newItem.sessionId = sessionId ?? null;
+      newItem.quantity = quantity;
+      newItem.clubId = menuItem.clubId;
+
+      await cartRepo.save(newItem);
+      res.status(201).json(newItem);
     }
-
-    const newItem = new MenuCartItem();
-    newItem.menuItemId = menuItemId;
-    newItem.variantId = variantId ?? undefined;
-    newItem.userId = userId ?? null;
-    newItem.sessionId = sessionId ?? null;
-    newItem.quantity = quantity;
-    // newItem.unitPrice = unitPrice;
-    newItem.clubId = menuItem.clubId;
-
-    await cartRepo.save(newItem);
-    res.status(201).json(newItem);
   } catch (err) {
     console.error("❌ Error adding to menu cart:", err);
     res.status(500).json({ error: "Server error adding item" });
@@ -145,6 +129,12 @@ export const updateMenuCartItem = async (req: AuthenticatedRequest, res: Respons
     const { quantity } = req.body;
     const userId = req.user?.id ?? null;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
 
     if (!quantity || quantity <= 0) {
       res.status(400).json({ error: "Quantity must be greater than zero" });
@@ -193,6 +183,12 @@ export const getUserMenuCart = async (req: AuthenticatedRequest, res: Response):
   try {
     const userId = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
     const cartRepo = AppDataSource.getRepository(MenuCartItem);
     const whereClause = userId ? { userId } : { sessionId };
 
@@ -204,22 +200,37 @@ export const getUserMenuCart = async (req: AuthenticatedRequest, res: Response):
 
     const enrichedItems = items.map(item => {
       const { menuItem, variant } = item;
+      const club = menuItem.club;
       const basePrice = menuItem.hasVariants
-        ? variant?.price ?? 0
-        : menuItem.price!;
+        ? Number(variant?.price ?? 0)
+        : Number(menuItem.price!);
 
-      // const currentPrice = computeDynamicPrice({
-      //   basePrice: menuItem.price,
-      //   clubOpenDays: club.openDays,
-      //   openHours: club.openHours,
-      // });
-
-      // const discountApplied = Math.max(0, Math.round((basePrice - currentPrice) * 100) / 100);
+      // Calculate dynamic pricing
+      let dynamicPrice = basePrice;
+      
+      if (menuItem.dynamicPricingEnabled && club) {
+        dynamicPrice = computeDynamicPrice({
+          basePrice,
+          clubOpenDays: club.openDays,
+          openHours: club.openHours,
+          useDateBasedLogic: false,
+        });
+      }
 
       return {
-        ...item,
-        // currentPrice,
-        // discountApplied
+        id: item.id,
+        menuItemId: item.menuItemId,
+        variantId: item.variantId,
+        quantity: item.quantity,
+        menuItem: {
+          ...menuItem,
+          price: basePrice,
+          dynamicPrice: dynamicPrice
+        },
+        variant: variant,
+        basePrice,
+        dynamicPrice,
+        discountApplied: Math.max(0, basePrice - dynamicPrice)
       };
     });
 
@@ -236,6 +247,12 @@ export const removeMenuCartItem = async (req: AuthenticatedRequest, res: Respons
     const { id } = req.params;
     const userId = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
 
     const cartRepo = AppDataSource.getRepository(MenuCartItem);
     const item = await cartRepo.findOneBy({ id });
@@ -264,6 +281,12 @@ export const clearMenuCart = async (req: AuthenticatedRequest, res: Response): P
     const userId = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
+
     const cartRepo = AppDataSource.getRepository(MenuCartItem);
     const whereClause = userId ? { userId } : { sessionId };
 
@@ -280,6 +303,12 @@ export const clearTicketCartFromMenu = async (req: AuthenticatedRequest, res: Re
   try {
     const userId = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    // Ensure we have either a userId or sessionId
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
 
     const cartRepo = AppDataSource.getRepository(CartItem); // TicketCartItem
     const whereClause = userId ? { userId } : { sessionId };

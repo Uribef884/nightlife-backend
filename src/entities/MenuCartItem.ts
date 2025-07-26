@@ -28,9 +28,6 @@ export class MenuCartItem {
   @Column('int')
   quantity!: number;
 
-  @Column("decimal", { nullable: true })
-  unitPrice?: number;
-
   @Column()
   clubId!: string; // for consistency enforcement
 

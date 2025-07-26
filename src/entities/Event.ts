@@ -39,6 +39,9 @@ export class Event {
   @Column({ type: "date" })
   availableDate!: Date;
 
+  @Column('jsonb', { nullable: true })
+  openHours?: { open: string, close: string };
+
   @Column({ default: true })
   isActive!: boolean;
 

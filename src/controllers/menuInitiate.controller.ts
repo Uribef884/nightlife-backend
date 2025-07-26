@@ -3,7 +3,7 @@ import { AppDataSource } from "../config/data-source";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { isDisposableEmail } from "../utils/disposableEmailValidator";
 import { processSuccessfulMenuCheckout } from "./menuCheckout.controller";
-// import { computeDynamicPrice } from "../utils/dynamicPricing";
+import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { differenceInMinutes } from "date-fns";
 import { AuthenticatedRequest } from "../types/express";
 
@@ -81,13 +81,14 @@ export const initiateMenuCheckout = async (req: Request, res: Response) => {
       basePrice = item.menuItem.price;
     }
 
-    // const dynamicPrice = computeDynamicPrice({
-    //   basePrice,
-    //   clubOpenDays: club.openDays,
-    //   openHours: club.openHours,
-    // });
-    // item.unitPrice = Number(dynamicPrice);
-    // total += dynamicPrice * item.quantity;
+    // Compute dynamic price and store it in the cart item
+    const dynamicPrice = computeDynamicPrice({
+      basePrice,
+      clubOpenDays: club.openDays,
+      openHours: Array.isArray(club.openHours) && club.openHours.length > 0 ? club.openHours[0].open + '-' + club.openHours[0].close : "",
+    });
+    
+    total += dynamicPrice * item.quantity;
   }
 
   const reference = `mock-${Date.now()}`;

@@ -6,16 +6,39 @@ import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
 import { MenuPurchase } from "../entities/MenuPurchase";
 import { sanitizeInput } from "../utils/sanitizeInput";
 import { AuthenticatedRequest } from "../types/express";
+import { computeDynamicPrice } from "../utils/dynamicPricing";
+import { Club } from "../entities/Club";
 
 export const getVariantsByMenuItemId = async (req: Request, res: Response): Promise<void> => {
   try {
     const { menuItemId } = req.params;
     const variantRepo = AppDataSource.getRepository(MenuItemVariant);
+    const itemRepo = AppDataSource.getRepository(MenuItem);
+    const clubRepo = AppDataSource.getRepository(Club);
     const variants = await variantRepo.find({
       where: { menuItemId, isActive: true, isDeleted: false },
       order: { name: "ASC" },
     });
-    res.json(variants);
+    const menuItem = await itemRepo.findOne({ where: { id: menuItemId }, relations: ["club"] });
+    let club = null;
+    if (menuItem) {
+      club = menuItem.club || (await clubRepo.findOne({ where: { id: menuItem.clubId } }));
+    }
+    const variantsWithDynamic = variants.map(variant => {
+      let dynamicPrice = variant.price;
+      if (variant.dynamicPricingEnabled && club) {
+        dynamicPrice = computeDynamicPrice({
+          basePrice: Number(variant.price),
+          clubOpenDays: club.openDays,
+          openHours: club.openHours,
+        });
+      }
+      return {
+        ...variant,
+        dynamicPrice,
+      };
+    });
+    res.json(variantsWithDynamic);
   } catch (err) {
     console.error("Error fetching variants:", err);
     res.status(500).json({ error: "Failed to load variants" });
