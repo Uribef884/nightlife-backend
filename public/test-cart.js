@@ -1,4 +1,16 @@
+console.log('🚀 Script starting...');
+
+// Add global error handler
+window.addEventListener('error', (e) => {
+  console.error('🚨 Global error caught:', e.error);
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('🚨 Unhandled promise rejection:', e.reason);
+});
+
 document.addEventListener("DOMContentLoaded", () => {
+  console.log('📄 DOM Content Loaded event fired');
   // DOM Elements
   const emailInput = document.getElementById("email");
   const emailSection = document.getElementById("emailSection");
@@ -15,6 +27,9 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentUser = null;
   let cartItems = [];
   let clubs = [];
+  
+  // Initialize cart summaries
+  window.cartSummaries = { ticket: null, menu: null };
 
   // Additional DOM elements for club functionality
   const clubSelector = document.getElementById('clubSelector');
@@ -29,6 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const clearBtn = document.getElementById('clearBtn');
   const ticketCheckoutBtn = document.getElementById('ticketCheckoutBtn');
   const menuCheckoutBtn = document.getElementById('menuCheckoutBtn');
+  const returnToLoginBtn = document.getElementById('returnToLoginBtn');
 
   // Utility Functions
   function getCartType() {
@@ -70,6 +86,21 @@ document.addEventListener("DOMContentLoaded", () => {
     return `$${Number(price).toFixed(2)}`;
   }
 
+  // Gateway fees calculation (matching backend logic exactly)
+  function calculateGatewayFees(basePrice) {
+    const fixed = 700; // Fixed fee in COP
+    const variable = basePrice * 0.0265; // Variable fee 2.65% of the base price
+    const subtotal = fixed + variable;
+    const iva = subtotal * 0.19; // IVA 19% on the subtotal
+
+    return {
+      totalGatewayFee: Math.round(subtotal * 100) / 100,
+      iva: Math.round(iva * 100) / 100,
+    };
+  }
+
+
+
   function renderPrice(basePrice, dynamicPrice) {
     if (dynamicPrice !== undefined && dynamicPrice !== null && Number(dynamicPrice) !== Number(basePrice)) {
       return `
@@ -80,6 +111,22 @@ document.addEventListener("DOMContentLoaded", () => {
       `;
     } else {
       return `<div class="no-discount">${formatPrice(basePrice)}</div>`;
+    }
+  }
+
+  function renderTotalPrice(basePrice, dynamicPrice, quantity) {
+    const baseTotal = basePrice * quantity;
+    const dynamicTotal = dynamicPrice * quantity;
+    
+    if (dynamicPrice !== undefined && dynamicPrice !== null && Number(dynamicPrice) !== Number(basePrice)) {
+      return `
+        <div class="price-display">
+          <div class="base-price">${formatPrice(baseTotal)}</div>
+          <div class="dynamic-price">${formatPrice(dynamicTotal)}</div>
+        </div>
+      `;
+    } else {
+      return `<div class="no-discount">${formatPrice(baseTotal)}</div>`;
     }
   }
 
@@ -97,16 +144,25 @@ document.addEventListener("DOMContentLoaded", () => {
     const header = `
       <div class="cart-item-header">
         <div>Item</div>
-        <div>Type</div>
+        <div>Type/Variant</div>
         <div>Qty</div>
         <div>Price</div>
-        <div>Total</div>
         <div>Actions</div>
       </div>
     `;
 
     const items = cartItems.map(item => {
-      const itemTotal = (item.dynamicPrice || item.price) * item.quantity;
+      // Use dynamic price if available, otherwise use base price
+      // For menu items with variants, override basePrice with variant price
+      const basePrice = item.type === 'menu' && item.variant?.price !== undefined
+        ? item.variant.price
+        : item.price;
+
+      // Use dynamic price if available
+      const itemPrice = item.dynamicPrice !== undefined && item.dynamicPrice !== null
+        ? item.dynamicPrice
+        : basePrice;
+      const itemTotal = itemPrice * item.quantity;
       totalAmount += itemTotal;
       totalItems += item.quantity;
 
@@ -128,37 +184,150 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
       }
 
+      // Determine item type display
+      let typeDisplay = item.type === 'ticket' ? '🎫' : '🍽️';
+      let typeText = item.type === 'ticket' ? 'Ticket' : 'Menu';
+      
+      // For menu items with variants, show variant information
+      if (item.type === 'menu' && item.variant) {
+        typeDisplay = '🍾'; // Bottle icon for variants
+        typeText = `Variant: ${item.variant.name} (ID: ${item.variantId})`;
+      } else if (item.type === 'menu' && item.hasVariants && !item.variant) {
+        typeDisplay = '🍽️';
+        typeText = 'Menu (No Variant)';
+      }
+
+      // Generate price breakdown HTML if available
+      let priceBreakdownHtml = '';
+      if (item.priceBreakdown) {
+        const breakdown = item.priceBreakdown;
+        priceBreakdownHtml = `
+          <div class="price-breakdown" style="display: none;">
+            <div class="breakdown-header">
+              <h4>💰 Price Breakdown</h4>
+              <button class="toggle-breakdown" data-item-id="${item.id}">📊 Show Details</button>
+            </div>
+            <div class="breakdown-content">
+              <div class="breakdown-row">
+                <span>Item Price:</span>
+                <span>${formatPrice(breakdown.itemPrice)}</span>
+              </div>
+              <div class="breakdown-row">
+                <span>Quantity:</span>
+                <span>${item.quantity}</span>
+              </div>
+              <div class="breakdown-row">
+                <span>Item Total:</span>
+                <span>${formatPrice(breakdown.itemTotal)}</span>
+              </div>
+              <div class="breakdown-row breakdown-fee">
+                <span>Platform Fee (${(breakdown.platformFeeRate * 100).toFixed(1)}%):</span>
+                <span>${formatPrice(breakdown.platformFee)}</span>
+              </div>
+              <div class="breakdown-row breakdown-total">
+                <span><strong>Operation Cost:</strong></span>
+                <span><strong>${formatPrice(breakdown.operationCost)}</strong></span>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
       return `
         <div class="cart-item" data-item-id="${item.id}" data-item-type="${item.type}">
           <div class="item-name">${item.name || item.id}</div>
-          <div class="item-type ${item.type}">${item.type === 'ticket' ? '🎫' : '🍽️'}</div>
+          <div class="item-type ${item.type}" title="${typeText}">
+            ${typeDisplay}
+            ${item.type === 'menu' && item.variant ? `<br><small>${item.variant.name}</small>` : ''}
+          </div>
           <div class="item-quantity">
             <div class="quantity-controls">
               <button class="quantity-btn minus-btn" data-action="decrease" data-item-id="${item.id}" data-current-qty="${item.quantity}" ${item.quantity <= 1 ? 'disabled' : ''}>-</button>
               <span class="quantity-display">${item.quantity}</span>
               <button class="quantity-btn plus-btn" data-action="increase" data-item-id="${item.id}" data-current-qty="${item.quantity}">+</button>
-            </div>
+            </div> 
           </div>
-          <div class="item-price">${renderPrice(item.price, item.dynamicPrice)}</div>
-          <div class="item-total">${formatPrice(itemTotal)}</div>
+          <div class="item-price">${renderTotalPrice(item.variant?.price ?? item.price, itemPrice, item.quantity)}</div>
           <div class="item-controls">
             <button class="delete-btn" data-action="delete" data-item-id="${item.id}" title="Remove item">🗑️</button>
           </div>
         </div>
         ${linkedItemsHtml}
+        ${priceBreakdownHtml}
       `;
     }).join('');
 
+    // Use cart summaries from backend if available
+    let totalProductCost = 0;
+    let totalOperationCost = 0;
+    let finalTotal = 0;
+
+    if (window.cartSummaries && (window.cartSummaries.ticket || window.cartSummaries.menu)) {
+      // Use whichever summary has items (only one can have items due to exclusivity)
+      if (window.cartSummaries.ticket && window.cartSummaries.ticket.total > 0) {
+        totalProductCost += window.cartSummaries.ticket.total;
+        totalOperationCost += window.cartSummaries.ticket.operationalCosts;
+        finalTotal += window.cartSummaries.ticket.actualTotal;
+      } else if (window.cartSummaries.menu && window.cartSummaries.menu.total > 0) {
+        totalProductCost += window.cartSummaries.menu.total;
+        totalOperationCost += window.cartSummaries.menu.operationalCosts;
+        finalTotal += window.cartSummaries.menu.actualTotal;
+      } else {
+        // Both summaries are empty, use whichever exists for proper structure
+        if (window.cartSummaries.ticket) {
+          totalProductCost += window.cartSummaries.ticket.total;
+          totalOperationCost += window.cartSummaries.ticket.operationalCosts;
+          finalTotal += window.cartSummaries.ticket.actualTotal;
+        } else if (window.cartSummaries.menu) {
+          totalProductCost += window.cartSummaries.menu.total;
+          totalOperationCost += window.cartSummaries.menu.operationalCosts;
+          finalTotal += window.cartSummaries.menu.actualTotal;
+        }
+      }
+    } else {
+      // Fallback to frontend calculation
+      cartItems.forEach(item => {
+        if (item.priceBreakdown) {
+          totalProductCost += item.priceBreakdown.itemTotal;
+          totalOperationCost += item.priceBreakdown.operationCost;
+        } else {
+          const itemTotal = (item.dynamicPrice || item.price) * item.quantity;
+          totalProductCost += itemTotal;
+        }
+      });
+      finalTotal = totalProductCost + totalOperationCost;
+      console.log('⚠️ Using frontend calculation (no backend summaries available)');
+    }
+    
+    console.log(`🛒 [FRONTEND-CART] TOTALS:`);
+    console.log(`   Total Product Cost: ${totalProductCost}`);
+    console.log(`   Total Operation Cost: ${totalOperationCost}`);
+    console.log(`   Final Total: ${finalTotal}`);
+    console.log(`   ========================================`);
+
     const total = `
-      <div class="cart-total">
-        <span>Total Items: ${totalItems}</span>
-        <span>Total Amount: ${formatPrice(totalAmount)}</span>
+      <div class="price-breakdown-total">
+        <h3>Total cost</h3>
+        <div class="breakdown-table">
+          <div class="breakdown-row">
+            <span>Product costs:</span>
+            <span>${formatPrice(totalProductCost)}</span>
+          </div>
+          <div class="breakdown-row">
+            <span>Service fee:</span>
+            <span>${formatPrice(totalOperationCost)}</span>
+          </div>
+          <div class="breakdown-row breakdown-total">
+            <span>Total:</span>
+            <span>${formatPrice(finalTotal)}</span>
+          </div>
+        </div>
       </div>
     `;
 
     cartItemsContainer.innerHTML = header + items + total;
     cartItemCount.textContent = `${totalItems} items`;
-    cartTotal.textContent = `Total: ${formatPrice(totalAmount)}`;
+    cartTotal.textContent = ``;
     
     // Add event listeners for cart item controls
     addCartItemEventListeners();
@@ -249,14 +418,18 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       showStatus(checkoutStatus, "⏳ Loading cart...", "info");
       
-      // Check both ticket and menu carts
-      const [ticketRes, menuRes] = await Promise.all([
+      // Check both ticket and menu carts (items and summaries)
+      const [ticketRes, menuRes, ticketSummaryRes, menuSummaryRes] = await Promise.all([
         fetch('/cart', { credentials: "include" }),
-        fetch('/menu/cart', { credentials: "include" })
+        fetch('/menu/cart', { credentials: "include" }),
+        fetch('/cart/summary', { credentials: "include" }),
+        fetch('/menu/cart/summary', { credentials: "include" })
       ]);
       
       let ticketData = [];
       let menuData = [];
+      let ticketSummary = null;
+      let menuSummary = null;
       
       if (ticketRes.ok) {
         const ticketResponse = await ticketRes.json();
@@ -266,6 +439,14 @@ document.addEventListener("DOMContentLoaded", () => {
       if (menuRes.ok) {
         const menuResponse = await menuRes.json();
         menuData = Array.isArray(menuResponse) ? menuResponse : [];
+      }
+      
+      if (ticketSummaryRes.ok) {
+        ticketSummary = await ticketSummaryRes.json();
+      }
+      
+      if (menuSummaryRes.ok) {
+        menuSummary = await menuSummaryRes.json();
       }
       
       // Combine both cart types
@@ -283,7 +464,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 price: item.ticket.price || 0,
                 dynamicPrice: item.ticket.dynamicPrice,
             date: item.date,
-            menuItems: item.menuItems || []
+            menuItems: item.menuItems || [],
+            priceBreakdown: item.priceBreakdown || null
           });
         } else {
           // Handle flat ticket structure
@@ -295,7 +477,8 @@ document.addEventListener("DOMContentLoaded", () => {
             quantity: item.quantity || 1,
             price: item.price || 0,
             dynamicPrice: item.dynamicPrice,
-                date: item.date
+                date: item.date,
+                priceBreakdown: item.priceBreakdown || null
           });
         }
       });
@@ -306,11 +489,16 @@ document.addEventListener("DOMContentLoaded", () => {
           allCartItems.push({
             id: item.id,
             menuItemId: item.menuItemId || item.menuItem.id,
-                name: item.menuItem.name || `Menu Item ${item.menuItemId || item.menuItem.id}`,
-                type: 'menu',
-                quantity: item.quantity || 1,
-                price: item.menuItem.price || 0,
-                dynamicPrice: item.menuItem.dynamicPrice
+            name: item.menuItem.name || `Menu Item ${item.menuItemId || item.menuItem.id}`,
+            type: 'menu',
+            quantity: item.quantity || 1,
+            price: item.menuItem.price || 0,
+            dynamicPrice: item.menuItem.dynamicPrice,
+            // Add variant information
+            variantId: item.variantId,
+            variant: item.variant,
+            hasVariants: item.menuItem.hasVariants,
+            priceBreakdown: item.priceBreakdown || null
           });
         } else {
           // Handle flat menu structure
@@ -319,27 +507,37 @@ document.addEventListener("DOMContentLoaded", () => {
             menuItemId: item.menuItemId,
             name: item.name || item.menuItemName || `Menu Item ${item.id}`,
             type: 'menu',
-                quantity: item.quantity || 1,
-                price: item.price || 0,
-                dynamicPrice: item.dynamicPrice
+            quantity: item.quantity || 1,
+            price: item.price || 0,
+            dynamicPrice: item.dynamicPrice,
+            // Add variant information if available
+            variantId: item.variantId,
+            variant: item.variant,
+            hasVariants: item.hasVariants,
+            priceBreakdown: item.priceBreakdown || null
           });
         }
       });
       
       cartItems = allCartItems;
       
+      // Store cart summaries for use in display
+      window.cartSummaries = {
+        ticket: ticketSummary,
+        menu: menuSummary
+      };
+      
       logResult({ ticketItems: ticketData.length, menuItems: menuData.length, totalItems: cartItems.length });
       showStatus(checkoutStatus, "✅ Cart loaded successfully", "success");
         
         // Force update the cart display
         updateCartDisplay();
-        console.log('Cart items updated:', cartItems);
-      console.log('Cart items details:', cartItems.map(item => ({ id: item.id, type: item.type, name: item.name })));
     } catch (err) {
       logResult({ error: 'Failed to load cart', details: err.message }, true);
       showStatus(checkoutStatus, `❌ Failed to load cart: ${err.message}`, "error");
       // Clear cart display on error
       cartItems = [];
+      window.cartSummaries = { ticket: null, menu: null };
       updateCartDisplay();
     }
   }
@@ -365,8 +563,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (ticketRes.ok || menuRes.ok) {
         logResult({ message: "Cart cleared successfully" });
         showStatus(checkoutStatus, "✅ Cart cleared successfully", "success");
-        // Clear cart display
+        // Clear cart display and summaries
         cartItems = [];
+        window.cartSummaries = { ticket: null, menu: null };
         updateCartDisplay();
         updateCheckoutStatus();
       } else {
@@ -380,6 +579,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function handleTicketCheckout() {
+    console.log('🎫 Ticket checkout button clicked!');
+    
     // If logged in, don't send email in body
     const requestBody = isLoggedIn ? {} : { email: emailInput.value.trim() };
     
@@ -391,6 +592,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       showStatus(checkoutStatus, "⏳ Processing ticket checkout...", "info");
       
+      // Step 1: Initiate checkout
       const res = await fetch("/checkout/initiate", {
         method: "POST",
         credentials: "include",
@@ -401,8 +603,36 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
       
       if (res.ok) {
-        logResult(data);
-        showStatus(checkoutStatus, "✅ Ticket checkout completed successfully", "success");
+        if (data.transactionId) {
+          // Paid checkout - proceed with confirmation
+          logResult({ message: 'Ticket checkout initiated', data });
+          showStatus(checkoutStatus, "⏳ Confirming ticket transaction...", "info");
+          
+          // Step 2: Confirm checkout
+          const confirmRes = await fetch("/checkout/confirm", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...requestBody,
+              transactionId: data.transactionId
+            }),
+          });
+          
+          const confirmData = await confirmRes.json();
+          
+          if (confirmRes.ok) {
+            logResult(confirmData);
+            showStatus(checkoutStatus, "✅ Ticket checkout completed successfully", "success");
+          } else {
+            logResult(confirmData, true);
+            showStatus(checkoutStatus, `❌ Ticket checkout confirmation failed: ${confirmData.error || 'Unknown error'}`, "error");
+          }
+        } else {
+          // Free checkout - already completed
+          logResult(data);
+          showStatus(checkoutStatus, "✅ Free ticket checkout completed successfully", "success");
+        }
       } else {
         logResult(data, true);
         showStatus(checkoutStatus, `❌ Ticket checkout failed: ${data.error || 'Unknown error'}`, "error");
@@ -414,6 +644,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   async function handleMenuCheckout() {
+    console.log('🍽️ Menu checkout button clicked!');
+    
     // If logged in, don't send email in body
     const requestBody = isLoggedIn ? {} : { email: emailInput.value.trim() };
     
@@ -425,6 +657,7 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       showStatus(checkoutStatus, "⏳ Processing menu checkout...", "info");
       
+      // Step 1: Initiate checkout
       const res = await fetch("/menu/checkout/initiate", {
         method: "POST",
         credentials: "include",
@@ -435,8 +668,36 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = await res.json();
       
       if (res.ok) {
-        logResult(data);
-        showStatus(checkoutStatus, "✅ Menu checkout completed successfully", "success");
+        if (data.transactionId) {
+          // Paid checkout - proceed with confirmation
+          logResult({ message: 'Menu checkout initiated', data });
+          showStatus(checkoutStatus, "⏳ Confirming menu transaction...", "info");
+          
+          // Step 2: Confirm checkout
+          const confirmRes = await fetch("/menu/checkout/confirm", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...requestBody,
+              transactionId: data.transactionId
+            }),
+          });
+          
+          const confirmData = await confirmRes.json();
+          
+          if (confirmRes.ok) {
+            logResult(confirmData);
+            showStatus(checkoutStatus, "✅ Menu checkout completed successfully", "success");
+          } else {
+            logResult(confirmData, true);
+            showStatus(checkoutStatus, `❌ Menu checkout confirmation failed: ${confirmData.error || 'Unknown error'}`, "error");
+          }
+        } else {
+          // Free checkout - already completed
+          logResult(data);
+          showStatus(checkoutStatus, "✅ Free menu checkout completed successfully", "success");
+        }
       } else {
         logResult(data, true);
         showStatus(checkoutStatus, `❌ Menu checkout failed: ${data.error || 'Unknown error'}`, "error");
@@ -491,10 +752,11 @@ document.addEventListener("DOMContentLoaded", () => {
         const ticketPrice = parseFloat(button.dataset.ticketPrice);
         const ticketDynamicPrice = parseFloat(button.dataset.ticketDynamicPrice);
         const ticketCategory = button.dataset.ticketCategory;
+        const eventDate = button.dataset.eventDate;
         
-        // For event tickets, use today's date. For normal tickets, show date picker
+        // For event tickets, use the event's available date. For normal tickets, show date picker
         if (ticketCategory === 'event') {
-          addTicketToCart(ticketId, ticketName, ticketPrice, ticketDynamicPrice);
+          addTicketToCart(ticketId, ticketName, ticketPrice, ticketDynamicPrice, eventDate);
         } else {
           showDatePickerForTicket(ticketId, ticketName, ticketPrice, ticketDynamicPrice);
         }
@@ -514,6 +776,30 @@ document.addEventListener("DOMContentLoaded", () => {
         const variantDynamicPrice = parseFloat(button.dataset.variantDynamicPrice);
         addMenuItemToCart(menuItemIdVar, variantId, menuItemNameVar, variantPrice, variantDynamicPrice);
         break;
+      case 'toggle-breakdown':
+        const breakdownItemId = button.dataset.itemId;
+        togglePriceBreakdown(breakdownItemId, button);
+        break;
+    }
+  }
+
+  // Toggle price breakdown visibility
+  function togglePriceBreakdown(itemId, button) {
+    const cartItem = document.querySelector(`[data-item-id="${itemId}"]`);
+    if (!cartItem) return;
+    
+    const breakdown = cartItem.nextElementSibling;
+    if (!breakdown || !breakdown.classList.contains('price-breakdown')) return;
+    
+    const content = breakdown.querySelector('.breakdown-content');
+    const isVisible = content.style.display !== 'none';
+    
+    if (isVisible) {
+      content.style.display = 'none';
+      button.textContent = '📊 Show Details';
+    } else {
+      content.style.display = 'block';
+      button.textContent = '📊 Hide Details';
     }
   }
 
@@ -572,12 +858,8 @@ document.addEventListener("DOMContentLoaded", () => {
         logResult(data);
         showStatus(checkoutStatus, "✅ Quantity updated successfully", "success");
         
-        // Update local cart data immediately instead of full refresh
-        const item = cartItems.find(item => item.id === itemId);
-        if (item) {
-          item.quantity = newQuantity;
-          updateCartDisplay();
-        }
+        // Refresh the entire cart to get updated price breakdown
+        setTimeout(() => handleViewCart(), 100);
       } else {
         logResult(data, true);
         showStatus(checkoutStatus, `❌ Failed to update quantity: ${data.error || 'Unknown error'}`, "error");
@@ -624,7 +906,7 @@ document.addEventListener("DOMContentLoaded", () => {
         logResult({ message: "Item removed successfully" });
         showStatus(checkoutStatus, "✅ Item removed successfully", "success");
         // Refresh cart display
-        await handleViewCart();
+        setTimeout(() => handleViewCart(), 100);
       } else {
         let data = {};
         try {
@@ -761,6 +1043,7 @@ document.addEventListener("DOMContentLoaded", () => {
               <div style="font-size: 0.65rem; margin-left: 6px;">
                 • ${item.menuItemName}
                 ${item.variantName ? ` (${item.variantName})` : ''}
+                ${item.variantId ? `<br><span style="color: #667eea; font-size: 0.6rem;">Variant ID: ${item.variantId}</span>` : ''}
                 <span style="color: #28a745;">x${item.quantity}</span>
               </div>
             `).join('')}
@@ -815,6 +1098,7 @@ document.addEventListener("DOMContentLoaded", () => {
                   return `
                     <div style="margin-left: 8px; margin-bottom: 6px; padding: 6px; background: #f8f9fa; border-radius: 3px;">
                       <div style="font-size: 0.75rem; font-weight: 600;">${variant.name}</div>
+                      <div style="font-size: 0.6rem; color: #667eea; margin-bottom: 2px;">ID: ${variant.id}</div>
                       <div style="font-size: 0.7rem; color: #28a745;">${variantPriceDisplay}</div>
                       <button class="add-to-cart-btn btn-small" style="font-size: 0.7rem; padding: 3px 6px;" data-action="add-menu-item-variant" data-menu-item-id="${item.id}" data-variant-id="${variant.id}" data-menu-item-name="${item.name} - ${variant.name}" data-variant-price="${variant.price}" data-variant-dynamic-price="${variant.dynamicPrice || variant.price}">
                         🍽️ Add Variant
@@ -875,6 +1159,7 @@ document.addEventListener("DOMContentLoaded", () => {
                       <div style="font-size: 0.6rem; margin-left: 4px;">
                         • ${item.menuItemName}
                         ${item.variantName ? ` (${item.variantName})` : ''}
+                        ${item.variantId ? `<br><span style="color: #667eea; font-size: 0.55rem;">Variant ID: ${item.variantId}</span>` : ''}
                         <span style="color: #28a745;">x${item.quantity}</span>
                       </div>
                     `).join('')}
@@ -893,7 +1178,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     ${ticket.quantity !== null ? ` | Available: ${ticket.quantity}` : ''}
                   </div>
                   ${includedItemsHtml}
-                  <button class="add-to-cart-btn" style="font-size: 0.8rem; padding: 4px 8px;" data-action="add-ticket" data-ticket-id="${ticket.id}" data-ticket-name="${ticket.name}" data-ticket-price="${ticket.price}" data-ticket-dynamic-price="${ticket.dynamicPrice || ticket.price}" data-ticket-category="${ticket.category}" ${soldOut}>
+                  <button class="add-to-cart-btn" style="font-size: 0.8rem; padding: 4px 8px;" data-action="add-ticket" data-ticket-id="${ticket.id}" data-ticket-name="${ticket.name}" data-ticket-price="${ticket.price}" data-ticket-dynamic-price="${ticket.dynamicPrice || ticket.price}" data-ticket-category="${ticket.category}" data-event-date="${event.availableDate}" ${soldOut}>
                     🎫 Add to Cart
                   </button>
                 </div>
@@ -920,11 +1205,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Add ticket to cart
-  async function addTicketToCart(ticketId, ticketName, basePrice, dynamicPrice) {
+  async function addTicketToCart(ticketId, ticketName, basePrice, dynamicPrice, eventDate = null) {
     try {
-      // Get today's date for the ticket
-      const today = new Date();
-      const dateStr = today.toISOString().split('T')[0];
+      // Use event date if provided, otherwise use today's date
+      let dateStr;
+      if (eventDate) {
+        // If eventDate is provided, use it directly
+        dateStr = eventDate;
+      } else {
+        // Get today's date for regular tickets
+        const today = new Date();
+        dateStr = today.toISOString().split('T')[0];
+      }
 
       const payload = {
         ticketId: ticketId,
@@ -1049,48 +1341,183 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // Event Listeners
-  loadClubBtn.addEventListener("click", loadClubDetails);
-  viewBtn.addEventListener("click", handleViewCart);
-  clearBtn.addEventListener("click", handleClearCart);
-  ticketCheckoutBtn.addEventListener("click", handleTicketCheckout);
-  menuCheckoutBtn.addEventListener("click", handleMenuCheckout);
-  returnToLoginBtn.addEventListener("click", () => window.location.href = "/");
-
-  // Email input change
-  emailInput.addEventListener("input", () => {
-    updateEmailSection();
-    updateCheckoutStatus();
-  });
-  
-  // Add event delegation for club content (tickets, menu items, events)
-  clubContent.addEventListener("click", handleCartItemClick);
-  
-  // Date picker modal event listeners
-  document.getElementById('datePickerClose').addEventListener('click', hideDatePicker);
-  document.getElementById('datePickerCancel').addEventListener('click', hideDatePicker);
-  document.getElementById('datePickerForm').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const date = document.getElementById('ticketDate').value;
-    if (date) {
-      addTicketToCartWithDate(date);
-    }
-  });
-  
-  // Close modal when clicking outside
-  document.getElementById('datePickerModal').addEventListener('click', (e) => {
-    if (e.target.id === 'datePickerModal') {
-      hideDatePicker();
-    }
-  });
-
   // Initialize
   async function initialize() {
+    console.log('🔧 Initializing test cart...');
+    
+    // Wait for DOM to be fully loaded
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Re-select DOM elements to ensure they're available
+    const loadClubBtn = document.getElementById('loadClubBtn');
+    const viewBtn = document.getElementById('viewBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const ticketCheckoutBtn = document.getElementById('ticketCheckoutBtn');
+    const menuCheckoutBtn = document.getElementById('menuCheckoutBtn');
+    const returnToLoginBtn = document.getElementById('returnToLoginBtn');
+    const emailInput = document.getElementById('emailInput');
+    const clubContent = document.getElementById('clubContent');
+    
+    console.log('🔍 DOM element search results:', {
+      loadClubBtn: !!loadClubBtn,
+      viewBtn: !!viewBtn,
+      clearBtn: !!clearBtn,
+      ticketCheckoutBtn: !!ticketCheckoutBtn,
+      menuCheckoutBtn: !!menuCheckoutBtn,
+      returnToLoginBtn: !!returnToLoginBtn,
+      emailInput: !!emailInput,
+      clubContent: !!clubContent
+    });
+    
+    // Debug button visibility and positioning
+    if (ticketCheckoutBtn) {
+      const rect = ticketCheckoutBtn.getBoundingClientRect();
+      const styles = window.getComputedStyle(ticketCheckoutBtn);
+      console.log('🎯 ticketCheckoutBtn debug:', {
+        visible: styles.display !== 'none' && styles.visibility !== 'hidden',
+        display: styles.display,
+        visibility: styles.visibility,
+        position: styles.position,
+        zIndex: styles.zIndex,
+        rect: rect,
+        text: ticketCheckoutBtn.textContent,
+        disabled: ticketCheckoutBtn.disabled
+      });
+    }
+    
+    if (menuCheckoutBtn) {
+      const rect = menuCheckoutBtn.getBoundingClientRect();
+      const styles = window.getComputedStyle(menuCheckoutBtn);
+      console.log('🎯 menuCheckoutBtn debug:', {
+        visible: styles.display !== 'none' && styles.visibility !== 'hidden',
+        display: styles.display,
+        visibility: styles.visibility,
+        position: styles.position,
+        zIndex: styles.zIndex,
+        rect: rect,
+        text: menuCheckoutBtn.textContent,
+        disabled: menuCheckoutBtn.disabled
+      });
+    }
+    
+    console.log('DOM elements found:', {
+      ticketCheckoutBtn: !!ticketCheckoutBtn,
+      menuCheckoutBtn: !!menuCheckoutBtn,
+      returnToLoginBtn: !!returnToLoginBtn,
+      emailInput: !!emailInput,
+      clubContent: !!clubContent
+    });
+    
+    // Attach event listeners
+    console.log('🎯 Attaching event listeners...');
+    if (loadClubBtn) {
+      loadClubBtn.addEventListener("click", loadClubDetails);
+      console.log('✅ loadClubBtn listener attached');
+    }
+    if (viewBtn) {
+      viewBtn.addEventListener("click", handleViewCart);
+      console.log('✅ viewBtn listener attached');
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener("click", handleClearCart);
+      console.log('✅ clearBtn listener attached');
+    }
+    if (ticketCheckoutBtn) {
+      // Remove any existing listeners first
+      ticketCheckoutBtn.replaceWith(ticketCheckoutBtn.cloneNode(true));
+      const newTicketCheckoutBtn = document.getElementById('ticketCheckoutBtn');
+      
+      newTicketCheckoutBtn.addEventListener("click", handleTicketCheckout, true);
+      console.log('✅ ticketCheckoutBtn listener attached');
+      
+      // Add immediate click test with capture
+      newTicketCheckoutBtn.addEventListener("click", (e) => {
+        console.log('🎯 Raw click detected on ticketCheckoutBtn!', e);
+        newTicketCheckoutBtn.style.backgroundColor = 'red';
+        setTimeout(() => {
+          newTicketCheckoutBtn.style.backgroundColor = '';
+        }, 500);
+      }, true);
+      
+      // Also try mousedown event
+      newTicketCheckoutBtn.addEventListener("mousedown", (e) => {
+        console.log('🎯 Mouse down detected on ticketCheckoutBtn!', e);
+      });
+    }
+    if (menuCheckoutBtn) {
+      // Remove any existing listeners first
+      menuCheckoutBtn.replaceWith(menuCheckoutBtn.cloneNode(true));
+      const newMenuCheckoutBtn = document.getElementById('menuCheckoutBtn');
+      
+      newMenuCheckoutBtn.addEventListener("click", handleMenuCheckout, true);
+      console.log('✅ menuCheckoutBtn listener attached');
+      
+      // Add immediate click test with capture
+      newMenuCheckoutBtn.addEventListener("click", (e) => {
+        console.log('🎯 Raw click detected on menuCheckoutBtn!', e);
+        newMenuCheckoutBtn.style.backgroundColor = 'red';
+        setTimeout(() => {
+          newMenuCheckoutBtn.style.backgroundColor = '';
+        }, 500);
+      }, true);
+      
+      // Also try mousedown event
+      newMenuCheckoutBtn.addEventListener("mousedown", (e) => {
+        console.log('🎯 Mouse down detected on menuCheckoutBtn!', e);
+      });
+    }
+    if (returnToLoginBtn) {
+      returnToLoginBtn.addEventListener("click", () => window.location.href = "/");
+      console.log('✅ returnToLoginBtn listener attached');
+    }
+
+    // Email input change
+    if (emailInput) emailInput.addEventListener("input", () => {
+      updateEmailSection();
+      updateCheckoutStatus();
+    });
+    
+    // Add event delegation for club content (tickets, menu items, events)
+    if (clubContent) clubContent.addEventListener("click", handleCartItemClick);
+    
+    // Date picker modal event listeners
+    const datePickerClose = document.getElementById('datePickerClose');
+    const datePickerCancel = document.getElementById('datePickerCancel');
+    const datePickerForm = document.getElementById('datePickerForm');
+    const datePickerModal = document.getElementById('datePickerModal');
+    
+    if (datePickerClose) datePickerClose.addEventListener('click', hideDatePicker);
+    if (datePickerCancel) datePickerCancel.addEventListener('click', hideDatePicker);
+    if (datePickerForm) datePickerForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const date = document.getElementById('ticketDate').value;
+      if (date) {
+        addTicketToCartWithDate(date);
+      }
+    });
+    
+    // Close modal when clicking outside
+    if (datePickerModal) datePickerModal.addEventListener('click', (e) => {
+      if (e.target.id === 'datePickerModal') {
+        hideDatePicker();
+      }
+    });
+    
     await checkAuthStatus();
     updateEmailSection();
     updateCheckoutStatus();
     await loadClubs();
     await handleViewCart();
+    console.log('Test cart initialization complete');
+    
+    // Test programmatic click after 2 seconds
+    setTimeout(() => {
+      console.log('🧪 Testing programmatic click...');
+      if (ticketCheckoutBtn) {
+        console.log('🧪 Programmatically clicking ticketCheckoutBtn...');
+        ticketCheckoutBtn.click();
+      }
+    }, 2000);
   }
 
   initialize();

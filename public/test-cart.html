@@ -267,7 +267,7 @@
 
     .cart-item {
       display: grid;
-      grid-template-columns: 1fr auto auto auto auto auto;
+      grid-template-columns: 1fr auto auto auto auto;
       gap: 15px;
       align-items: center;
       padding: 15px;
@@ -279,7 +279,7 @@
 
     .cart-item-header {
       display: grid;
-      grid-template-columns: 1fr auto auto auto auto auto;
+      grid-template-columns: 1fr auto auto auto auto;
       gap: 15px;
       padding: 10px 15px;
       background: #667eea;
@@ -310,6 +310,14 @@
     .item-type.menu {
       background: #ffc107;
       color: #212529;
+    }
+
+    .item-type.menu small {
+      display: block;
+      font-size: 0.7rem;
+      margin-top: 2px;
+      color: #666;
+      font-weight: normal;
     }
 
     .item-quantity {
@@ -349,7 +357,7 @@
     .item-total {
       text-align: right;
       font-weight: bold;
-      color: #28a745;
+      color: #333;
     }
 
     .item-controls {
@@ -476,6 +484,109 @@
       font-size: 0.75rem;
       font-weight: 600;
       margin-left: auto;
+    }
+
+    /* Price Breakdown Styles */
+    .price-breakdown {
+      margin-top: 10px;
+      margin-left: 20px;
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .breakdown-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 15px;
+      background: #e9ecef;
+      border-bottom: 1px solid #dee2e6;
+    }
+
+    .breakdown-header h4 {
+      margin: 0;
+      color: #495057;
+      font-size: 0.9rem;
+    }
+
+    .toggle-breakdown {
+      background: #6c757d;
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .toggle-breakdown:hover {
+      background: #5a6268;
+    }
+
+    .breakdown-content {
+      padding: 15px;
+      display: none;
+    }
+
+    .breakdown-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0;
+      font-size: 0.85rem;
+    }
+
+    .breakdown-fee {
+      color: #6c757d;
+      font-size: 0.8rem;
+    }
+
+    .breakdown-total {
+      border-top: 1px solid #dee2e6;
+      margin-top: 8px;
+      padding-top: 8px;
+      color: #495057;
+    }
+
+    /* Total Price Breakdown Styles */
+    .price-breakdown-total {
+      margin-top: 20px;
+      padding: 20px;
+      background: white;
+      border: 1px solid #e1e5e9;
+      border-radius: 10px;
+    }
+
+    .price-breakdown-total h3 {
+      margin: 0 0 15px 0;
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #333;
+    }
+
+    .breakdown-table {
+      width: 100%;
+    }
+
+    .breakdown-table .breakdown-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      font-size: 0.9rem;
+      color: #333;
+    }
+
+    .breakdown-table .breakdown-row.breakdown-total {
+      border-top: 1px solid #dee2e6;
+      margin-top: 8px;
+      padding-top: 12px;
+      font-weight: bold;
+      font-size: 1rem;
+      color: #495057;
     }
 
     .cart-actions {

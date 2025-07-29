@@ -53,7 +53,7 @@ export const createMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
       return;
     }
 
-    const { menuItemId, name, price } = req.body;
+    const { menuItemId, name, price, dynamicPricingEnabled } = req.body;
     const sanitized = sanitizeInput(name);
 
     if (!sanitized || typeof price !== "number" || price <= 0) {
@@ -81,6 +81,7 @@ export const createMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
       price,
       menuItemId,
       isActive: true,
+      dynamicPricingEnabled: dynamicPricingEnabled !== undefined ? !!dynamicPricingEnabled : true, // Default to true for variants
     });
 
     await variantRepo.save(variant);
@@ -95,7 +96,7 @@ export const updateMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
   try {
     const user = req.user;
     const { id } = req.params;
-    const { name, price, isActive } = req.body;
+    const { name, price, isActive, dynamicPricingEnabled } = req.body;
 
     if (!user || user.role !== "clubowner") {
       res.status(403).json({ error: "Only club owners can update variants" });
@@ -144,6 +145,10 @@ export const updateMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
 
     if (typeof isActive === "boolean") {
       variant.isActive = isActive;
+    }
+
+    if (typeof dynamicPricingEnabled === "boolean") {
+      variant.dynamicPricingEnabled = dynamicPricingEnabled;
     }
 
     await variantRepo.save(variant);

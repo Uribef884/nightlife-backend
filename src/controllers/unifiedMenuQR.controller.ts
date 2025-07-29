@@ -40,7 +40,7 @@ export async function previewUnifiedMenuQR(
           itemName: purchase.menuItem.name,
           variant: purchase.variant?.name || null,
           quantity: purchase.quantity,
-          unitPrice: purchase.pricePerUnit
+          unitPrice: purchase.priceAtCheckout
         })),
         totalPaid: transaction.totalPaid,
         purchaseDate: transaction.createdAt,
@@ -131,7 +131,7 @@ export async function confirmUnifiedMenuQR(
           itemName: purchase.menuItem.name,
           variant: purchase.variant?.name || null,
           quantity: purchase.quantity,
-          unitPrice: purchase.pricePerUnit
+          unitPrice: purchase.priceAtCheckout
         })),
         totalPaid: transaction.totalPaid,
         purchaseDate: transaction.createdAt,

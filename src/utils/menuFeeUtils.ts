@@ -1,3 +1,5 @@
+import { GATEWAY_FEES } from "../config/fees";
+
 export function calculatePlatformFee(basePrice: number, percent: number): number {
   return Math.round(basePrice * percent * 100) / 100;
 }
@@ -6,10 +8,10 @@ export function calculateGatewayFees(basePrice: number): {
   totalGatewayFee: number;
   iva: number;
 } {
-  const fixed = 700; // Wompi fixed fee
-  const variable = basePrice * 0.0265; // 2.65%
+  const fixed = GATEWAY_FEES.FIXED;
+  const variable = basePrice * GATEWAY_FEES.VARIABLE;
   const subtotal = fixed + variable;
-  const iva = subtotal * 0.19;
+  const iva = subtotal * GATEWAY_FEES.IVA;
 
   return {
     totalGatewayFee: Math.round(subtotal * 100) / 100,

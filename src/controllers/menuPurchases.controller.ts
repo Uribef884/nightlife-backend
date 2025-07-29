@@ -20,7 +20,7 @@ function formatTransaction(tx: MenuPurchaseTransaction, role: Role) {
       menuItem: p.menuItem,
       variant: p.variant ?? null,
       quantity: p.quantity,
-      pricePerUnit: p.pricePerUnit,
+      priceAtCheckout: p.priceAtCheckout,
     })),
   };
 

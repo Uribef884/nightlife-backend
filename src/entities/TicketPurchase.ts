@@ -64,32 +64,28 @@ export class TicketPurchase {
   @Column({ type: "timestamp", nullable: true })
   menuQRUsedAt?: Date;
 
+  // 🎯 Individual ticket pricing information
   @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
-  userPaid!: number;
-
-  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
-  clubReceives!: number;
+  originalBasePrice!: number;
 
   @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
-  platformReceives!: number;
+  priceAtCheckout!: number;
+
+  @Column({ default: false })
+  dynamicPricingWasApplied!: boolean;
+
+  @Column({ type: "varchar", nullable: true })
+  dynamicPricingReason?: string; // e.g., "early_bird", "closed_day", "event_advance"
 
   @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
-  gatewayFee!: number;
+  clubReceives!: number; // What the club gets for this specific ticket
 
+  // 🎯 Individual ticket fees (proportional to this ticket's price)
   @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) } })
-  gatewayIVA!: number;
-
-  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) }, nullable: true })
-  retentionICA?: number;
-
-  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) }, nullable: true })
-  retentionIVA?: number;
-
-  @Column("numeric", { transformer: { to: v => v, from: v => parseFloat(v) }, nullable: true })
-  retentionFuente?: number;
+  platformFee!: number; // Platform fee for this specific ticket
 
   @Column("numeric")
-  platformFeeApplied!: number;
+  platformFeeApplied!: number; // Platform fee percentage applied
 
   @ManyToOne(() => PurchaseTransaction, (t) => t.purchases)
   @JoinColumn({ name: "purchaseTransactionId" })

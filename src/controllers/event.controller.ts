@@ -4,7 +4,7 @@ import { Event } from "../entities/Event";
 import { AuthenticatedRequest } from "../types/express";
 import { Ticket } from "../entities/Ticket";
 import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
-import { computeDynamicPrice } from "../utils/dynamicPricing";
+import { computeDynamicPrice, computeDynamicEventPrice, getEventTicketDynamicPricingReason } from "../utils/dynamicPricing";
 
 // GET /events — public
 export const getAllEvents = async (req: Request, res: Response) => {
@@ -58,36 +58,23 @@ export const getEventsByClubId = async (req: Request, res: Response) => {
                 eventDate = new Date(event.availableDate);
               }
               
-              const [openHour, openMinute] = event.openHours.open.split(':').map(Number);
+              // Use the exact same logic as the frontend (ticket controller)
+              dynamicPrice = computeDynamicEventPrice(Number(ticket.price), new Date(event.availableDate), event.openHours);
               
-              // Create the event open time in local timezone
-              const eventOpenTime = new Date(
-                eventDate.getFullYear(),
-                eventDate.getMonth(),
-                eventDate.getDate(),
-                openHour,
-                openMinute,
-                0,
-                0
-              );
-              
-              // Use the event's open time as the reference for dynamic pricing
-              dynamicPrice = computeDynamicPrice({
-                basePrice: Number(ticket.price),
-                clubOpenDays: event.club.openDays,
-                openHours: event.club.openHours, // Fallback to club hours if needed
-                availableDate: eventOpenTime, // Use event's open time as the reference
-                useDateBasedLogic: true, // Use date-based logic with event's open time
-              });
+              // Check if event has passed grace period
+              if (dynamicPrice === -1) {
+                // For event display, we'll show the ticket as unavailable instead of blocking
+                dynamicPrice = 0; // Set to 0 to indicate unavailable
+              }
             } else {
               // Fallback to club's open hours if event doesn't have specific hours
-              dynamicPrice = computeDynamicPrice({
-                basePrice: Number(ticket.price),
-                clubOpenDays: event.club.openDays,
-                openHours: event.club.openHours,
-                availableDate: event.availableDate,
-                useDateBasedLogic: true, // Use date-based logic with event date
-              });
+              dynamicPrice = computeDynamicEventPrice(Number(ticket.price), new Date(event.availableDate), event.openHours);
+              
+              // Check if event has passed grace period
+              if (dynamicPrice === -1) {
+                // For event display, we'll show the ticket as unavailable instead of blocking
+                dynamicPrice = 0; // Set to 0 to indicate unavailable
+              }
             }
           }
           

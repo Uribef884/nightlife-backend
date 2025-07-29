@@ -7,7 +7,8 @@ import { processSuccessfulCheckout } from "./ticketCheckout.controller";
 import { issueMockTransaction, mockValidateWompiTransaction } from "../services/mockWompiService";
 import { differenceInMinutes } from "date-fns"; // 🆕 For TTL logic
 import { AuthenticatedRequest } from "../types/express";
-import { computeDynamicPrice, computeDynamicEventPrice } from "../utils/dynamicPricing";
+import { computeDynamicPrice, computeDynamicEventPrice, getNormalTicketDynamicPricingReason, getEventTicketDynamicPricingReason } from "../utils/dynamicPricing";
+import { getTicketCommissionRate } from "../config/fees";
 
 export const initiateMockCheckout = async (req: Request, res: Response) => {
   const typedReq = req as AuthenticatedRequest;
@@ -32,7 +33,7 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
 
   const cartItems = await cartRepo.find({
     where,
-    relations: ["ticket", "ticket.club"],
+    relations: ["ticket", "ticket.club", "ticket.event"],
   });
 
   if (!cartItems.length) {
@@ -77,10 +78,27 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
     // Compute dynamic price based on ticket type and settings
     let dynamicPrice = basePrice;
     
-    if (ticket.dynamicPricingEnabled) {
-      if (ticket.category === "event" && ticket.availableDate) {
-        // Event ticket - use date-based dynamic pricing
-        dynamicPrice = computeDynamicEventPrice(basePrice, new Date(ticket.availableDate));
+          if (ticket.dynamicPricingEnabled) {
+        if (ticket.category === "event" && ticket.event) {
+          // Event ticket - use event's date and openHours for dynamic pricing
+          dynamicPrice = computeDynamicEventPrice(Number(ticket.price), new Date(ticket.event.availableDate), ticket.event.openHours);
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            return res.status(400).json({ 
+              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+            });
+          }
+              } else if (ticket.category === "event" && ticket.availableDate) {
+          // Fallback: Event ticket without event relation - use ticket's availableDate
+          dynamicPrice = computeDynamicEventPrice(basePrice, new Date(ticket.availableDate));
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            return res.status(400).json({ 
+              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+            });
+          }
       } else {
         // General ticket - use time-based dynamic pricing
         dynamicPrice = computeDynamicPrice({
@@ -92,7 +110,7 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
     }
     
     // Calculate fees based on the dynamic price
-    const platformFee = calculatePlatformFee(dynamicPrice, 0.05);
+    const platformFee = calculatePlatformFee(dynamicPrice, getTicketCommissionRate(ticket.category === "event"));
     const { totalGatewayFee, iva } = calculateGatewayFees(dynamicPrice);
     const finalPerUnit = dynamicPrice + platformFee + totalGatewayFee + iva;
     total += finalPerUnit * item.quantity;
@@ -101,10 +119,14 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
   const reference = issueMockTransaction();
   console.log(`[INITIATE] Mock reference ${reference} | User: ${userId ?? sessionId} | Email: ${email}`);
 
-  const mockResult = await mockValidateWompiTransaction(reference);
-  if (!mockResult.approved) {
-    return res.status(400).json({ error: "Mock transaction failed" });
-  }
-
-  return await processSuccessfulCheckout({ userId, sessionId, email, req, res, transactionId: reference });
+  // Return the mock transaction reference for the frontend to confirm
+  const response = {
+    success: true,
+    transactionId: reference,
+    total: total,
+    message: "Ticket checkout initiated successfully"
+  };
+  
+  console.log(`[INITIATE] Returning response:`, response);
+  return res.json(response);
 };

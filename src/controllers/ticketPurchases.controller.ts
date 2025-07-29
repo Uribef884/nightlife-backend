@@ -46,7 +46,7 @@ async function formatTransactionWithMenu(tx: PurchaseTransaction, role: Role) {
       id: p.id,
       ticketId: p.ticketId,
       date: p.date,
-      userPaid: p.userPaid,
+      priceAtCheckout: p.priceAtCheckout,
       ticket: p.ticket,
       qrCodeEncrypted: p.qrCodeEncrypted,
       menuItems

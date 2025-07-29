@@ -6,6 +6,7 @@ import { Club } from "../entities/Club";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { AuthenticatedRequest } from "../types/express";
 import { CartItem } from "../entities/TicketCartItem";
+import { summarizeCartTotals } from "../utils/cartSummary";
 
 // ✅ Ownership check for deletion
 function ownsMenuCartItem(item: MenuCartItem, userId?: string, sessionId?: string): boolean {
@@ -125,8 +126,7 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
 
 export const updateMenuCartItem = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    const { quantity } = req.body;
+    const { id, quantity } = req.body;
     const userId = req.user?.id ?? null;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
@@ -136,8 +136,8 @@ export const updateMenuCartItem = async (req: AuthenticatedRequest, res: Respons
       return;
     }
 
-    if (!quantity || quantity <= 0) {
-      res.status(400).json({ error: "Quantity must be greater than zero" });
+    if (!id || !quantity || quantity <= 0) {
+      res.status(400).json({ error: "Valid ID and quantity are required" });
       return;
     }
 
@@ -178,17 +178,16 @@ export const updateMenuCartItem = async (req: AuthenticatedRequest, res: Respons
   }
 };
 
-// ✅ GET /menu/cart — user or session
-export const getUserMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const getMenuCartItems = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
-    // Ensure we have either a userId or sessionId
     if (!userId && !sessionId) {
       res.status(401).json({ error: "Missing or invalid token" });
       return;
     }
+
     const cartRepo = AppDataSource.getRepository(MenuCartItem);
     const whereClause = userId ? { userId } : { sessionId };
 
@@ -198,45 +197,110 @@ export const getUserMenuCart = async (req: AuthenticatedRequest, res: Response):
       order: { createdAt: "DESC" },
     });
 
-    const enrichedItems = items.map(item => {
+    // Calculate dynamic prices for each item
+    const itemsWithDynamicPrices = items.map(item => {
       const { menuItem, variant } = item;
       const club = menuItem.club;
       const basePrice = menuItem.hasVariants
         ? Number(variant?.price ?? 0)
         : Number(menuItem.price!);
 
-      // Calculate dynamic pricing
       let dynamicPrice = basePrice;
-      
-      if (menuItem.dynamicPricingEnabled && club) {
-        dynamicPrice = computeDynamicPrice({
-          basePrice,
-          clubOpenDays: club.openDays,
-          openHours: club.openHours,
-          useDateBasedLogic: false,
-        });
+
+      if (menuItem.hasVariants && variant) {
+        if (variant.dynamicPricingEnabled && club) {
+          dynamicPrice = computeDynamicPrice({
+            basePrice,
+            clubOpenDays: club.openDays,
+            openHours: club.openHours,
+            useDateBasedLogic: false,
+          });
+        }
+      } else {
+        if (menuItem.dynamicPricingEnabled && club) {
+          dynamicPrice = computeDynamicPrice({
+            basePrice,
+            clubOpenDays: club.openDays,
+            openHours: club.openHours,
+            useDateBasedLogic: false,
+          });
+        }
       }
 
+      // Add dynamic price to the menuItem object
       return {
-        id: item.id,
-        menuItemId: item.menuItemId,
-        variantId: item.variantId,
-        quantity: item.quantity,
+        ...item,
         menuItem: {
           ...menuItem,
-          price: basePrice,
           dynamicPrice: dynamicPrice
-        },
-        variant: variant,
-        basePrice,
-        dynamicPrice,
-        discountApplied: Math.max(0, basePrice - dynamicPrice)
+        }
       };
     });
 
-    res.status(200).json(enrichedItems);
+    res.status(200).json(itemsWithDynamicPrices);
   } catch (err) {
-    console.error("❌ Error fetching menu cart:", err);
+    console.error("❌ Error fetching menu cart items:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const getMenuCartSummary = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
+
+    const cartRepo = AppDataSource.getRepository(MenuCartItem);
+    const whereClause = userId ? { userId } : { sessionId };
+
+    const items = await cartRepo.find({
+      where: whereClause,
+      relations: ["menuItem", "variant", "menuItem.club"],
+      order: { createdAt: "DESC" },
+    });
+
+    const pricingInfo = items.map(item => {
+      const { menuItem, variant } = item;
+      const club = menuItem.club;
+      const basePrice = menuItem.hasVariants
+        ? Number(variant?.price ?? 0)
+        : Number(menuItem.price!);
+
+      let dynamicPrice = basePrice;
+
+      if (menuItem.hasVariants && variant) {
+        if (variant.dynamicPricingEnabled && club) {
+          dynamicPrice = computeDynamicPrice({
+            basePrice,
+            clubOpenDays: club.openDays,
+            openHours: club.openHours,
+            useDateBasedLogic: false,
+          });
+        }
+      } else {
+        if (menuItem.dynamicPricingEnabled && club) {
+          dynamicPrice = computeDynamicPrice({
+            basePrice,
+            clubOpenDays: club.openDays,
+            openHours: club.openHours,
+            useDateBasedLogic: false,
+          });
+        }
+      }
+
+      return {
+        itemTotal: dynamicPrice * item.quantity
+      };
+    });
+
+    const summary = summarizeCartTotals(pricingInfo, "menu");
+    res.status(200).json(summary);
+  } catch (err) {
+    console.error("❌ Error fetching menu cart summary:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };
@@ -274,7 +338,6 @@ export const removeMenuCartItem = async (req: AuthenticatedRequest, res: Respons
     res.status(500).json({ error: "Internal server error" });
   }
 };
-
 
 export const clearMenuCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {

@@ -76,6 +76,14 @@ export const createMenuItem = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
+    // Enforce that parent menu items with variants cannot have dynamic pricing enabled
+    if (hasVariants && dynamicPricingEnabled) {
+      res.status(400).json({ 
+        error: "Parent menu items with variants cannot have dynamic pricing enabled. Dynamic pricing should be configured on individual variants instead." 
+      });
+      return;
+    }
+
     const item = new MenuItem();
     item.name = sanitizedName;
     item.description = sanitizeInput(description) ?? undefined;
@@ -83,7 +91,8 @@ export const createMenuItem = async (req: AuthenticatedRequest, res: Response): 
     item.price = hasVariants ? null : price;
     item.hasVariants = hasVariants;
     item.maxPerPerson = maxPerPerson;
-    item.dynamicPricingEnabled = !!dynamicPricingEnabled;
+    // Force dynamic pricing to false for parent items with variants
+    item.dynamicPricingEnabled = hasVariants ? false : !!dynamicPricingEnabled;
     item.clubId = user.clubId;
     item.categoryId = categoryId;
     item.isActive = true;
@@ -170,6 +179,13 @@ export const updateMenuItem = async (req: AuthenticatedRequest, res: Response): 
     }
 
     if (dynamicPricingEnabled !== undefined) {
+      // Enforce that parent menu items with variants cannot have dynamic pricing enabled
+      if (item.hasVariants && dynamicPricingEnabled) {
+        res.status(400).json({ 
+          error: "Parent menu items with variants cannot have dynamic pricing enabled. Dynamic pricing should be configured on individual variants instead." 
+        });
+        return;
+      }
       item.dynamicPricingEnabled = !!dynamicPricingEnabled;
     }
 

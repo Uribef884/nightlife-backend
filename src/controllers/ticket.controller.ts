@@ -9,7 +9,7 @@ import { TicketCategory } from "../entities/Ticket";
 import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
 import { MenuItem } from "../entities/MenuItem";
 import { MenuItemVariant } from "../entities/MenuItemVariant";
-import { computeDynamicPrice } from "../utils/dynamicPricing";
+import { computeDynamicPrice, computeDynamicEventPrice, getEventTicketDynamicPricingReason } from "../utils/dynamicPricing";
 
 // Utility to normalize today's date
 const getTodayISO = (): string => {
@@ -435,7 +435,7 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
   res.json({ message: "Ticket updated successfully", ticket });
 };
 
-// ✅ GET ALL TICKETS
+  // ✅ GET ALL TICKETS
 export async function getAllTickets(req: Request, res: Response): Promise<void> {
   try {
     const repo = AppDataSource.getRepository(Ticket);
@@ -444,7 +444,7 @@ export async function getAllTickets(req: Request, res: Response): Promise<void> 
     
     const tickets = await repo.find({
       where: { isActive: true, isDeleted: false },
-      relations: ["club"],
+      relations: ["club", "event"],
       order: { priority: "ASC" },
     });
     
@@ -452,13 +452,34 @@ export async function getAllTickets(req: Request, res: Response): Promise<void> 
       const club = t.club || (await clubRepo.findOne({ where: { id: t.clubId } }));
       let dynamicPrice = t.price;
       if (t.dynamicPricingEnabled && club) {
-        dynamicPrice = computeDynamicPrice({
-          basePrice: Number(t.price),
-          clubOpenDays: club.openDays,
-          openHours: club.openHours,
-          availableDate: t.availableDate,
-          useDateBasedLogic: t.category === "event",
-        });
+        if (t.category === "event" && t.event) {
+          // Event ticket - use event's date and openHours for dynamic pricing
+          dynamicPrice = computeDynamicEventPrice(Number(t.price), new Date(t.event.availableDate), t.event.openHours);
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            // For ticket display, we'll show the ticket as unavailable instead of blocking
+            dynamicPrice = 0; // Set to 0 to indicate unavailable
+          }
+        } else if (t.category === "event" && t.availableDate) {
+          // Fallback: Event ticket without event relation - use ticket's availableDate
+          dynamicPrice = computeDynamicEventPrice(Number(t.price), new Date(t.availableDate));
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            // For ticket display, we'll show the ticket as unavailable instead of blocking
+            dynamicPrice = 0; // Set to 0 to indicate unavailable
+          }
+        } else {
+          // General ticket - use time-based dynamic pricing
+          dynamicPrice = computeDynamicPrice({
+            basePrice: Number(t.price),
+            clubOpenDays: club.openDays,
+            openHours: club.openHours,
+            availableDate: t.availableDate,
+            useDateBasedLogic: false,
+          });
+        }
       }
       
       // Fetch included menu items if this ticket includes them
@@ -512,20 +533,41 @@ export async function getTicketsByClub(req: Request, res: Response): Promise<voi
     const tickets = await repo.find({
       where: { club: { id }, isDeleted: false },
       order: { priority: "ASC" },
-      relations: ["club"],
+      relations: ["club", "event"],
     });
     
     const formatted = await Promise.all(tickets.map(async (t) => {
       const club = t.club || (await clubRepo.findOne({ where: { id: t.clubId } }));
       let dynamicPrice = t.price;
       if (t.dynamicPricingEnabled && club) {
-        dynamicPrice = computeDynamicPrice({
-          basePrice: Number(t.price),
-          clubOpenDays: club.openDays,
-          openHours: club.openHours,
-          availableDate: t.availableDate,
-          useDateBasedLogic: t.category === "event",
-        });
+        if (t.category === "event" && t.event) {
+          // Event ticket - use event's date and openHours for dynamic pricing
+          dynamicPrice = computeDynamicEventPrice(Number(t.price), new Date(t.event.availableDate), t.event.openHours);
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            // For ticket display, we'll show the ticket as unavailable instead of blocking
+            dynamicPrice = 0; // Set to 0 to indicate unavailable
+          }
+        } else if (t.category === "event" && t.availableDate) {
+          // Fallback: Event ticket without event relation - use ticket's availableDate
+          dynamicPrice = computeDynamicEventPrice(Number(t.price), new Date(t.availableDate));
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            // For ticket display, we'll show the ticket as unavailable instead of blocking
+            dynamicPrice = 0; // Set to 0 to indicate unavailable
+          }
+        } else {
+          // General ticket - use time-based dynamic pricing
+          dynamicPrice = computeDynamicPrice({
+            basePrice: Number(t.price),
+            clubOpenDays: club.openDays,
+            openHours: club.openHours,
+            availableDate: t.availableDate,
+            useDateBasedLogic: false,
+          });
+        }
       }
       
       // Fetch included menu items if this ticket includes them

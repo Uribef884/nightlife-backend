@@ -3,7 +3,8 @@ import {
   addToCart,
   updateCartItem,
   removeCartItem,
-  getUserCart,
+  getCartItems,
+  getCartSummary,
   clearCart,
   clearMenuCartFromTicket
 } from "../controllers/ticketCart.controller";
@@ -14,7 +15,8 @@ const router = Router();
 router.post("/add", addToCart);
 router.patch("/update", updateCartItem);
 router.delete("/item/:id", removeCartItem);
-router.get("/", getUserCart);
+router.get("/", getCartItems); // Returns cart items array
+router.get("/summary", getCartSummary); // Returns cart summary with totals
 router.delete("/clear", clearCart); 
 router.delete("/clear-other-cart", clearMenuCartFromTicket); //Used if user want to add menuitem to existing ticket cart
 

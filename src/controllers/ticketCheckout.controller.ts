@@ -17,6 +17,8 @@ import { mockValidateWompiTransaction } from "../services/mockWompiService";
 import { User } from "../entities/User";
 import { AuthenticatedRequest } from "../types/express"; 
 import QRCode from "qrcode";
+import { computeDynamicPrice, computeDynamicEventPrice, getNormalTicketDynamicPricingReason, getEventTicketDynamicPricingReason } from "../utils/dynamicPricing";
+import { getTicketCommissionRate } from "../config/fees";
 
 export const processSuccessfulCheckout = async ({
   userId,
@@ -44,7 +46,7 @@ export const processSuccessfulCheckout = async ({
 
   const cartItems = await cartRepo.find({
     where,
-    relations: ["ticket", "ticket.club"],
+    relations: ["ticket", "ticket.club", "ticket.event"],
   });
 
   if (!cartItems.length) {
@@ -75,18 +77,37 @@ export const processSuccessfulCheckout = async ({
   }
 
   const clubId = cartItems[0].ticket.clubId;
-  const rawDateStr = cartItems[0].date instanceof Date
-    ? cartItems[0].date.toISOString().split("T")[0]
-    : String(cartItems[0].date);
-  const todayStr = new Date().toISOString().split("T")[0];
-  if (rawDateStr < todayStr) {
+  
+  // 🎯 Improved date validation with timezone handling
+  let cartDate: Date;
+  if (cartItems[0].date instanceof Date) {
+    cartDate = cartItems[0].date;
+  } else {
+    // If it's a string, parse it properly
+    const dateStr = String(cartItems[0].date);
+    const [year, month, day] = dateStr.split("-").map(Number);
+    cartDate = new Date(year, month - 1, day);
+  }
+  
+  // Get today's date in the same timezone (start of day)
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  
+  // Compare dates properly
+  if (cartDate < todayStart) {
+    console.log(`[DEBUG] Date validation failed: cartDate=${cartDate.toISOString()}, todayStart=${todayStart.toISOString()}`);
     return res.status(400).json({ error: "Cannot select a past date" });
   }
+  
+  const date = cartDate;
+  
+  // Format date string for email templates
+  const dateStr = date.toISOString().split("T")[0];
 
-  const [year, month, day] = rawDateStr.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-
-  const platformFeePercentage = 0.05;
+  // Different commission rates based on ticket type
+  const getPlatformFeePercentage = (ticket: any) => {
+    return getTicketCommissionRate(ticket.category === "event");
+  };
   let retentionICA: number | undefined;
   let retentionIVA: number | undefined;
   let retentionFuente: number | undefined;
@@ -100,7 +121,7 @@ export const processSuccessfulCheckout = async ({
   const ticketPurchases: TicketPurchase[] = [];
   const user = userId ? await userRepo.findOneBy({ id: userId }) : undefined;
 
-  // First, calculate totals and update ticket quantities
+  // First, update ticket quantities
   for (const item of cartItems) {
     const ticket = item.ticket;
     const quantity = item.quantity;
@@ -113,36 +134,103 @@ export const processSuccessfulCheckout = async ({
       updatedTicket.quantity = (updatedTicket.quantity ?? 0) - quantity;
       await ticketRepo.save(updatedTicket);
     }
+  }
+
+  // 🎯 Calculate ticket totals first (before gateway fees)
+  for (const item of cartItems) {
+    const ticket = item.ticket;
+    const quantity = item.quantity;
 
     for (let i = 0; i < quantity; i++) {
       const basePrice = Number(ticket.price);
-      const platformFee = isFreeCheckout ? 0 : calculatePlatformFee(basePrice, platformFeePercentage);
-      const { totalGatewayFee: itemGatewayFee, iva } = isFreeCheckout
-        ? { totalGatewayFee: 0, iva: 0 }
-        : calculateGatewayFees(basePrice);
+      
+      // 🎯 Apply dynamic pricing if enabled
+      let dynamicPrice = basePrice;
+      let dynamicPricingReason: string | undefined;
+      
+      if (ticket.dynamicPricingEnabled) {
+        if (ticket.category === "event" && ticket.event) {
+          // Event ticket - use event's date and openHours for dynamic pricing
+          dynamicPrice = computeDynamicEventPrice(Number(ticket.price), new Date(ticket.event.availableDate), ticket.event.openHours);
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            return res.status(400).json({ 
+              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+            });
+          }
+          
+          // Determine reason using the new function
+          dynamicPricingReason = getEventTicketDynamicPricingReason(new Date(ticket.event.availableDate), ticket.event.openHours);
+        } else if (ticket.category === "event" && ticket.availableDate) {
+          // Fallback: Event ticket without event relation - use ticket's availableDate
+          const eventDate = new Date(ticket.availableDate);
+          dynamicPrice = computeDynamicEventPrice(basePrice, eventDate);
+          
+          // Determine reason using the new function
+          dynamicPricingReason = getEventTicketDynamicPricingReason(eventDate);
+        } else {
+          // General ticket - use time-based dynamic pricing
+          dynamicPrice = computeDynamicPrice({
+            basePrice,
+            clubOpenDays: ticket.club.openDays,
+            openHours: ticket.club.openHours, // Pass the array directly, not a string
+          });
+          
+          // Determine reason using the new function
+          dynamicPricingReason = getNormalTicketDynamicPricingReason({
+            basePrice,
+            clubOpenDays: ticket.club.openDays,
+            openHours: ticket.club.openHours,
+          });
+        }
+      }
+      
+      // 🎯 Calculate individual ticket fees (only platform fee)
+      const platformFee = isFreeCheckout ? 0 : calculatePlatformFee(dynamicPrice, getPlatformFeePercentage(ticket));
+      
+      const clubReceives = dynamicPrice;
 
-      const userPaid = basePrice + platformFee + itemGatewayFee + iva;
-      const clubReceives = basePrice;
+      console.log(`🎫 [TICKET-CHECKOUT] Item: ${ticket.name} (${i + 1}/${quantity})`);
+      console.log(`   Base Price: ${basePrice}`);
+      console.log(`   Dynamic Price: ${dynamicPrice}`);
+      console.log(`   Platform Fee Rate: ${getPlatformFeePercentage(ticket) * 100}%`);
+      console.log(`   Platform Fee: ${platformFee} (${dynamicPrice} × ${getPlatformFeePercentage(ticket)})`);
+      console.log(`   Item Total + Platform Fee: ${dynamicPrice + platformFee}`);
+      console.log(`   ---`);
 
-      totalPaid += userPaid;
+      // Add to transaction totals
+      totalPaid += dynamicPrice + platformFee;
       totalClubReceives += clubReceives;
       totalPlatformReceives += platformFee;
-      totalGatewayFee += itemGatewayFee;
-      totalGatewayIVA += iva;
     }
   }
+
+  // 🎯 Calculate transaction-level gateway fees based on the actual totalPaid
+  const { totalGatewayFee: transactionGatewayFee, iva: transactionIVA } = isFreeCheckout
+    ? { totalGatewayFee: 0, iva: 0 }
+    : calculateGatewayFees(totalPaid);
+
+  console.log(`🎫 [TICKET-CHECKOUT] TRANSACTION TOTALS:`);
+  console.log(`   Total Paid (before gateway): ${totalPaid}`);
+  console.log(`   Total Club Receives: ${totalClubReceives}`);
+  console.log(`   Total Platform Receives: ${totalPlatformReceives}`);
+  console.log(`   Gateway Fee: ${transactionGatewayFee}`);
+  console.log(`   Gateway IVA: ${transactionIVA}`);
+  console.log(`   Final Total: ${totalPaid + transactionGatewayFee + transactionIVA}`);
+  console.log(`   ========================================`);
 
   // Create and save the purchase transaction first
   const purchaseTransaction = transactionRepo.create({
     userId: userId || undefined,
     clubId,
-        email,
+    email,
     date,
-    totalPaid,
+    totalPaid: totalPaid + transactionGatewayFee + transactionIVA, // Add gateway fees to total
     clubReceives: totalClubReceives,
     platformReceives: totalPlatformReceives,
-    gatewayFee: totalGatewayFee,
-    gatewayIVA: totalGatewayIVA,
+    gatewayFee: transactionGatewayFee,
+    gatewayIVA: transactionIVA,
     retentionICA,
     retentionIVA,
     retentionFuente,
@@ -159,19 +247,79 @@ export const processSuccessfulCheckout = async ({
   const menuItemRepo = AppDataSource.getRepository(MenuItem);
   const menuItemVariantRepo = AppDataSource.getRepository(MenuItemVariant);
 
+  // Reset totals for individual ticket creation
+  let individualTotalPaid = 0;
+  let individualTotalClubReceives = 0;
+  let individualTotalPlatformReceives = 0;
+
   for (const item of cartItems) {
     const ticket = item.ticket;
     const quantity = item.quantity;
 
     for (let i = 0; i < quantity; i++) {
       const basePrice = Number(ticket.price);
-      const platformFee = isFreeCheckout ? 0 : calculatePlatformFee(basePrice, platformFeePercentage);
-      const { totalGatewayFee: itemGatewayFee, iva } = isFreeCheckout
-        ? { totalGatewayFee: 0, iva: 0 }
-        : calculateGatewayFees(basePrice);
+      
+      // 🎯 Apply dynamic pricing if enabled
+      let dynamicPrice = basePrice;
+      let dynamicPricingReason: string | undefined;
+      
+      if (ticket.dynamicPricingEnabled) {
+        if (ticket.category === "event" && ticket.event) {
+          // Event ticket - use event's date and openHours for dynamic pricing
+          // Use the exact same logic as the frontend (ticket controller)
+          dynamicPrice = computeDynamicEventPrice(Number(ticket.price), new Date(ticket.event.availableDate), ticket.event.openHours);
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            return res.status(400).json({ 
+              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+            });
+          }
+          
+          // Determine reason using the new function
+          dynamicPricingReason = getEventTicketDynamicPricingReason(new Date(ticket.event.availableDate), ticket.event.openHours);
+        } else if (ticket.category === "event" && ticket.availableDate) {
+          // Fallback: Event ticket without event relation - use ticket's availableDate
+          const eventDate = new Date(ticket.availableDate);
+          dynamicPrice = computeDynamicEventPrice(basePrice, eventDate);
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            return res.status(400).json({ 
+              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+            });
+          }
+          
+          // Determine reason using the new function
+          dynamicPricingReason = getEventTicketDynamicPricingReason(eventDate);
+        } else {
+          // General ticket - use time-based dynamic pricing
+          dynamicPrice = computeDynamicPrice({
+            basePrice,
+            clubOpenDays: ticket.club.openDays,
+            openHours: ticket.club.openHours, // Pass the array directly, not a string
+          });
+          
+          // Determine reason using the new function
+          dynamicPricingReason = getNormalTicketDynamicPricingReason({
+            basePrice,
+            clubOpenDays: ticket.club.openDays,
+            openHours: ticket.club.openHours,
+          });
+        }
+      }
+      
+      // 🎯 Calculate individual ticket fees (only platform fee)
+      const platformFee = isFreeCheckout ? 0 : calculatePlatformFee(dynamicPrice, getPlatformFeePercentage(ticket));
+      
+      const clubReceives = dynamicPrice;
 
-      const userPaid = basePrice + platformFee + itemGatewayFee + iva;
-      const clubReceives = basePrice;
+
+
+      // Add to individual totals for this ticket
+      individualTotalPaid += dynamicPrice + platformFee;
+      individualTotalClubReceives += clubReceives;
+      individualTotalPlatformReceives += platformFee;
 
       const purchase = purchaseRepo.create({
         ticketId: ticket.id,
@@ -180,12 +328,15 @@ export const processSuccessfulCheckout = async ({
         clubId,
         email,
         date,
-        userPaid,
-        clubReceives,
-        platformReceives: platformFee,
-        gatewayFee: itemGatewayFee,
-        gatewayIVA: iva,
-        platformFeeApplied: platformFeePercentage,
+        // 🎯 Individual ticket pricing information
+        originalBasePrice: basePrice,
+        priceAtCheckout: dynamicPrice,
+        dynamicPricingWasApplied: dynamicPrice !== basePrice,
+        dynamicPricingReason,
+        clubReceives: dynamicPrice, // What the club gets for this specific ticket
+        // 🎯 Individual ticket fees
+        platformFee: platformFee,
+        platformFeeApplied: getPlatformFeePercentage(ticket),
         purchaseTransactionId: purchaseTransaction.id,
       });
 
@@ -212,7 +363,7 @@ export const processSuccessfulCheckout = async ({
         await sendTicketEmail({
           to: email,
           ticketName: ticket.name,
-          date: rawDateStr,
+          date: dateStr,
           qrImageDataUrl: qrDataUrl,
           clubName: ticket.club?.name || "Your Club",
           index: i,
@@ -270,7 +421,7 @@ export const processSuccessfulCheckout = async ({
               to: email,
               email: email,
               ticketName: ticket.name,
-              date: rawDateStr,
+              date: dateStr,
               qrImageDataUrl: menuQrDataUrl,
               clubName: ticket.club?.name || "Your Club",
               items: menuItems,
@@ -298,16 +449,27 @@ export const processSuccessfulCheckout = async ({
     await cartRepo.delete({ sessionId });
   }
 
-  return res.json({
-    message: "Checkout completed",
-    transactionId: purchaseTransaction.id,
-    totalPaid,
-    tickets: ticketPurchases.map((p) => ({
-      id: p.id,
-      ticket: p.ticket,
-      userPaid: p.userPaid,
-    })),
-  });
+  // For free checkouts, don't return a transactionId since there's no payment gateway involved
+  if (isFreeCheckout) {
+    return res.json({
+      message: "Free checkout completed successfully",
+      totalPaid: purchaseTransaction.totalPaid,
+      tickets: ticketPurchases.map((p) => ({
+        id: p.id,
+        priceAtCheckout: p.priceAtCheckout,
+      })),
+    });
+  } else {
+    return res.json({
+      message: "Checkout completed",
+      transactionId: purchaseTransaction.id,
+      totalPaid: purchaseTransaction.totalPaid,
+      tickets: ticketPurchases.map((p) => ({
+        id: p.id,
+        priceAtCheckout: p.priceAtCheckout,
+      })),
+    });
+  }
 };
 
 export const checkout = async (req: Request, res: Response) => {
@@ -334,11 +496,15 @@ export const confirmMockCheckout = async (req: Request, res: Response) => {
   const email: string | undefined = typedReq.user?.email ?? typedReq.body?.email;
   const transactionId = req.body.transactionId;
 
+  console.log(`[CONFIRM] Received transactionId: ${transactionId}`);
+
   if (!email || !transactionId) {
     return res.status(400).json({ error: "Missing email or transaction ID" });
   }
 
   const wompiResponse = await mockValidateWompiTransaction(transactionId);
+  console.log(`[CONFIRM] Mock validation result:`, wompiResponse);
+  
   if (!wompiResponse.approved) {
     return res.status(400).json({ error: "Mock transaction not approved" });
   }

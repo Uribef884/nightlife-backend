@@ -6,6 +6,7 @@ import { processSuccessfulMenuCheckout } from "./menuCheckout.controller";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { differenceInMinutes } from "date-fns";
 import { AuthenticatedRequest } from "../types/express";
+import { issueMockTransaction } from "../services/mockWompiService";
 
 // 🍊 POST /menu/initiate
 export const initiateMenuCheckout = async (req: Request, res: Response) => {
@@ -81,18 +82,39 @@ export const initiateMenuCheckout = async (req: Request, res: Response) => {
       basePrice = item.menuItem.price;
     }
 
-    // Compute dynamic price and store it in the cart item
-    const dynamicPrice = computeDynamicPrice({
-      basePrice,
-      clubOpenDays: club.openDays,
-      openHours: Array.isArray(club.openHours) && club.openHours.length > 0 ? club.openHours[0].open + '-' + club.openHours[0].close : "",
-    });
+    // Compute dynamic price based on whether it's enabled
+    let dynamicPrice = basePrice;
+    
+    if (hasVariants && item.variant) {
+      // For variants, check variant's dynamic pricing setting
+      if (item.variant.dynamicPricingEnabled) {
+        dynamicPrice = computeDynamicPrice({
+          basePrice,
+          clubOpenDays: club.openDays,
+          openHours: Array.isArray(club.openHours) && club.openHours.length > 0 ? club.openHours[0].open + '-' + club.openHours[0].close : "",
+        });
+      }
+    } else {
+      // For regular menu items, check menu item's dynamic pricing setting
+      if (item.menuItem.dynamicPricingEnabled) {
+        dynamicPrice = computeDynamicPrice({
+          basePrice,
+          clubOpenDays: club.openDays,
+          openHours: Array.isArray(club.openHours) && club.openHours.length > 0 ? club.openHours[0].open + '-' + club.openHours[0].close : "",
+        });
+      }
+    }
     
     total += dynamicPrice * item.quantity;
   }
 
-  const reference = `mock-${Date.now()}`;
-  console.log(`[INITIATE] Mock menu reference ${reference} | User: ${userId ?? sessionId} | Email: ${email}`);
+  const reference = issueMockTransaction();
 
-  return await processSuccessfulMenuCheckout({ userId, sessionId, email, req, res, transactionId: reference });
+  // Return the mock transaction reference for the frontend to confirm
+  return res.json({
+    success: true,
+    transactionId: reference,
+    total: total,
+    message: "Menu checkout initiated successfully"
+  });
 };

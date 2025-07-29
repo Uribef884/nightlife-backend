@@ -2,11 +2,14 @@ import { Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { CartItem } from "../entities/TicketCartItem";
 import { AuthenticatedRequest } from "../types/express";
-import { computeDynamicPrice } from "../utils/dynamicPricing";
-import { Ticket } from "../entities/Ticket";
+import { computeDynamicPrice, computeDynamicEventPrice, getNormalTicketDynamicPricingReason, getEventTicketDynamicPricingReason } from "../utils/dynamicPricing";
+import { Ticket, TicketCategory } from "../entities/Ticket";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { toZonedTime, format } from "date-fns-tz";
 import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
+import { calculatePlatformFee, calculateGatewayFees } from "../utils/ticketfeeUtils";
+import { getTicketCommissionRate } from "../config/fees";
+import { summarizeCartTotals } from "../utils/cartSummary";
 
 function ownsCartItem(item: CartItem, userId?: string, sessionId?: string): boolean {
   if (userId) return item.userId === userId;
@@ -48,6 +51,31 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
       return;
     }
 
+    // Check if event has passed grace period for event tickets
+    if (ticket.category === "event" && ticket.dynamicPricingEnabled) {
+      let eventDate: Date;
+      let eventOpenHours: { open: string, close: string } | undefined;
+
+      if (ticket.event) {
+        eventDate = new Date(ticket.event.availableDate);
+        eventOpenHours = ticket.event.openHours;
+      } else if (ticket.availableDate) {
+        eventDate = new Date(ticket.availableDate);
+      } else {
+        res.status(400).json({ error: "Event ticket missing event date" });
+        return;
+      }
+
+      // Check if event has passed grace period
+      const dynamicPrice = computeDynamicEventPrice(Number(ticket.price), eventDate, eventOpenHours);
+      if (dynamicPrice === -1) {
+        res.status(400).json({ 
+          error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+        });
+        return;
+      }
+    }
+
     const menuCartRepo = AppDataSource.getRepository(MenuCartItem);
     const existingMenuItems = await menuCartRepo.find({ where: userId ? { userId } : { sessionId } });
     if (existingMenuItems.length > 0) {
@@ -73,12 +101,13 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
           club: { id: ticket.club.id },
           availableDate: new Date(`${date}T00:00:00`),
           isActive: true,
+          category: TicketCategory.EVENT, // Only check for paid events, not free events
         },
       });
 
       if (conflictEvent) {
         res.status(400).json({
-          error: `You cannot buy a general cover for ${date} because a special event already exists.`,
+          error: `You cannot buy a general cover for ${date} because a paid event already exists.`,
         });
         return;
       }
@@ -102,6 +131,27 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
     const whereClause = userId ? { userId } : { sessionId };
     const existingItems = await cartRepo.find({ where: whereClause, relations: ["ticket", "ticket.club"] });
 
+    // Check cart exclusivity rules
+    const isEventTicket = ticket.category === "event";
+    const isFreeTicket = ticket.category === "free";
+    
+    // Check if cart has event tickets (event tickets have priority)
+    const hasEventTickets = existingItems.some(item => item.ticket.category === "event");
+    
+    if (hasEventTickets) {
+      if (!isEventTicket) {
+        res.status(400).json({ error: "Cannot add non-event tickets when event tickets are in cart. Event tickets have priority." });
+        return;
+      }
+    } else if (isEventTicket) {
+      // Event tickets cannot coexist with any other tickets
+      if (existingItems.length > 0) {
+        res.status(400).json({ error: "Cannot add event tickets when other tickets are in cart. Please clear your cart first." });
+        return;
+      }
+    }
+
+    // Check club and date consistency
     for (const item of existingItems) {
       if (item.ticket.club.id !== ticket.club.id) {
         res.status(400).json({ error: "All tickets in cart must be from the same nightclub" });
@@ -252,12 +302,11 @@ export const removeCartItem = async (req: AuthenticatedRequest, res: Response): 
   }
 };
 
-export const getUserCart = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const getCartItems = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
     const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
 
-    // Ensure we have either a userId or sessionId
     if (!userId && !sessionId) {
       res.status(401).json({ error: "Missing or invalid token" });
       return;
@@ -272,91 +321,102 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
       order: { createdAt: "DESC" },
     });
 
-    // For each cart item, if ticket.includesMenuItem, fetch included menu items
-    const formatted = await Promise.all(items.map(async item => {
+    // Calculate dynamic prices for each item
+    const itemsWithDynamicPrices = await Promise.all(items.map(async item => {
       const ticket = item.ticket;
-      let menuItems: Array<{
-        id: string;
-        menuItemId: string;
-        menuItemName: string;
-        variantId?: string;
-        variantName: string | null;
-        quantity: number;
-      }> = [];
-      
-      if (ticket && ticket.includesMenuItem) {
+      if (!ticket) return item;
+
+      const basePrice = Number(ticket.price);
+      let dynamicPrice = basePrice;
+
+      if (ticket.dynamicPricingEnabled && ticket.club) {
+        if (ticket.category === "event" && ticket.availableDate) {
+          let eventDate: Date;
+          if (typeof ticket.availableDate === "string") {
+            const [year, month, day] = (ticket.availableDate as string).split("-").map(Number);
+            eventDate = new Date(year, month - 1, day);
+          } else {
+            eventDate = new Date(ticket.availableDate);
+          }
+
+          dynamicPrice = computeDynamicEventPrice(Number(ticket.price), eventDate, ticket.event?.openHours);
+          if (dynamicPrice === -1) dynamicPrice = 0;
+        } else {
+          dynamicPrice = computeDynamicPrice({
+            basePrice,
+            clubOpenDays: ticket.club.openDays,
+            openHours: ticket.club.openHours,
+            availableDate: new Date(item.date),
+            useDateBasedLogic: false,
+          });
+        }
+      }
+
+      // Add dynamic price to the ticket object
+      return {
+        ...item,
+        ticket: {
+          ...ticket,
+          dynamicPrice: dynamicPrice
+        }
+      };
+    }));
+
+    res.status(200).json(itemsWithDynamicPrices);
+  } catch (err) {
+    console.error("❌ Error fetching cart items:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const getCartSummary = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const sessionId: string | undefined = !userId && req.sessionId ? req.sessionId : undefined;
+
+    if (!userId && !sessionId) {
+      res.status(401).json({ error: "Missing or invalid token" });
+      return;
+    }
+
+    const cartRepo = AppDataSource.getRepository(CartItem);
+    const whereClause = userId ? { userId } : { sessionId };
+
+    const items = await cartRepo.find({
+      where: whereClause,
+      relations: ["ticket", "ticket.club", "ticket.event"],
+      order: { createdAt: "DESC" },
+    });
+
+    const pricingInfo = await Promise.all(items.map(async item => {
+      const ticket = item.ticket;
+      if (!ticket) return null;
+
+      // 🧠 Optional: prefetch included menu items for other controller logic, but not used here
+      if (ticket.includesMenuItem) {
         const repo = AppDataSource.getRepository(TicketIncludedMenuItem);
-        const included = await repo.find({
+        await repo.find({
           where: { ticketId: ticket.id },
           relations: ["menuItem", "variant"]
         });
-        menuItems = included.map(i => ({
-          id: i.id,
-          menuItemId: i.menuItemId,
-          menuItemName: i.menuItem?.name ?? null,
-          variantId: i.variantId,
-          variantName: i.variant?.name ?? null,
-          quantity: i.quantity
-        }));
       }
 
-      // Calculate dynamic pricing
       const basePrice = Number(ticket.price);
       let dynamicPrice = basePrice;
-      
+
       if (ticket.dynamicPricingEnabled && ticket.club) {
-        // For event tickets, use the event date and open hours
         if (ticket.category === "event" && ticket.availableDate) {
-          // Check if the ticket has an associated event with open hours
-          if (ticket.event && ticket.event.openHours && ticket.event.openHours.open && ticket.event.openHours.close) {
-            // Use event's open hours for dynamic pricing
-            let eventDate: Date;
-            
-            // Handle availableDate which can be Date or string from database
-            if (ticket.availableDate instanceof Date) {
-              eventDate = new Date(ticket.availableDate);
-            } else if (typeof ticket.availableDate === 'string') {
-              // If it's a date string like "2025-07-25", parse it as local date
-              const dateStr = ticket.availableDate as string;
-              const [year, month, day] = dateStr.split('-').map(Number);
-              eventDate = new Date(year, month - 1, day); // month is 0-indexed
-            } else {
-              // Fallback
-              eventDate = new Date(ticket.availableDate);
-            }
-            
-            const [openHour, openMinute] = ticket.event.openHours.open.split(':').map(Number);
-            
-            // Create the event open time in local timezone
-            const eventOpenTime = new Date(
-              eventDate.getFullYear(),
-              eventDate.getMonth(),
-              eventDate.getDate(),
-              openHour,
-              openMinute,
-              0,
-              0
-            );
-            
-            dynamicPrice = computeDynamicPrice({
-              basePrice,
-              clubOpenDays: ticket.club.openDays,
-              openHours: ticket.club.openHours, // Fallback to club hours if needed
-              availableDate: eventOpenTime, // Use event's open time as the reference
-              useDateBasedLogic: true, // Use date-based logic with event's open time
-            });
+          let eventDate: Date;
+          if (typeof ticket.availableDate === "string") {
+            const [year, month, day] = (ticket.availableDate as string).split("-").map(Number);
+            eventDate = new Date(year, month - 1, day);
           } else {
-            // Fallback to using just the event date
-            dynamicPrice = computeDynamicPrice({
-              basePrice,
-              clubOpenDays: ticket.club.openDays,
-              openHours: ticket.club.openHours,
-              availableDate: ticket.availableDate,
-              useDateBasedLogic: true,
-            });
+            eventDate = new Date(ticket.availableDate);
           }
+
+          dynamicPrice = computeDynamicEventPrice(Number(ticket.price), eventDate, ticket.event?.openHours);
+          if (dynamicPrice === -1) dynamicPrice = 0;
         } else {
-          // For general tickets, use the cart item date
           dynamicPrice = computeDynamicPrice({
             basePrice,
             clubOpenDays: ticket.club.openDays,
@@ -368,26 +428,16 @@ export const getUserCart = async (req: AuthenticatedRequest, res: Response): Pro
       }
 
       return {
-        id: item.id,
-        ticketId: item.ticketId,
-        quantity: item.quantity,
-        date: item.date,
-        ticket: {
-          ...ticket,
-          price: basePrice,
-          dynamicPrice: dynamicPrice
-        },
-        menuItems,
-        includedMenuItems: menuItems, // Add this for frontend compatibility
-        basePrice,
-        dynamicPrice,
-        discountApplied: Math.max(0, basePrice - dynamicPrice)
+        itemTotal: dynamicPrice * item.quantity,
+        isEvent: ticket.category === "event"
       };
     }));
 
-    res.status(200).json(formatted);
+    const filteredPricing = pricingInfo.filter((i): i is { itemTotal: number; isEvent: boolean } => i !== null);
+    const summary = summarizeCartTotals(filteredPricing, "ticket");
+    res.status(200).json(summary);
   } catch (err) {
-    console.error("❌ Error fetching cart:", err);
+    console.error("❌ Error fetching cart summary:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };
