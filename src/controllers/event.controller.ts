@@ -5,6 +5,8 @@ import { AuthenticatedRequest } from "../types/express";
 import { Ticket } from "../entities/Ticket";
 import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
 import { computeDynamicPrice, computeDynamicEventPrice, getEventTicketDynamicPricingReason } from "../utils/dynamicPricing";
+import { validateImageUrlWithResponse } from "../utils/validateImageUrl";
+import { sanitizeInput, sanitizeObject } from "../utils/sanitizeInput";
 
 // GET /events — public
 export const getAllEvents = async (req: Request, res: Response) => {
@@ -168,7 +170,12 @@ export const getMyClubEvents = async (req: AuthenticatedRequest, res: Response):
 // POST /events — clubOwner only
 export const createEvent = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { name, description, availableDate, openHours } = req.body;
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name', 'description'
+    ], { maxLength: 1000 });
+    
+    const { name, description, availableDate, openHours } = sanitizedBody;
     const user = req.user;
 
     if (!user || !user.clubId) {
@@ -340,8 +347,19 @@ export const deleteEvent = async (req: AuthenticatedRequest, res: Response) => {
 export const updateEvent = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { name, description, availableDate, openHours } = req.body;
+    
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name', 'description', 'bannerUrl'
+    ], { maxLength: 1000 });
+    
+    const { name, description, availableDate, openHours, bannerUrl } = sanitizedBody;
     const user = req.user;
+
+    // Validate image URL if provided
+    if (bannerUrl && !validateImageUrlWithResponse(bannerUrl, res)) {
+      return;
+    }
 
     if (!user || !user.clubId) {
       res.status(403).json({ error: "Forbidden: No clubId associated" });

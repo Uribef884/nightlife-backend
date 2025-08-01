@@ -112,7 +112,7 @@ export async function addTicketIncludedMenuItem(
     });
 
     if (existing) {
-      res.status(400).json({ error: "This menu item is already included in this ticket" });
+      res.status(400).json({ error: "Item already added to combo" });
       return;
     }
 

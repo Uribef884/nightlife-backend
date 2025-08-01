@@ -14,6 +14,7 @@ import { AuthenticatedRequest } from "../types/express";
 import QRCode from "qrcode";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { getMenuCommissionRate } from "../config/fees";
+import { sanitizeInput } from "../utils/sanitizeInput";
 
 export const processSuccessfulMenuCheckout = async ({
   userId,
@@ -327,11 +328,16 @@ export const checkoutMenu = async (req: Request, res: Response): Promise<Respons
   const typedReq = req as AuthenticatedRequest;
   const userId = typedReq.user?.id ?? null;
   const sessionId = !userId && typedReq.sessionId ? typedReq.sessionId : null;
-  const email: string | undefined = typedReq.user?.email ?? typedReq.body?.email;
-
-  if (!email) {
-    return res.status(400).json({ error: "Email is required for checkout" });
+  
+  // Sanitize email input
+  const rawEmail = typedReq.user?.email ?? typedReq.body?.email;
+  const sanitizedEmail = sanitizeInput(rawEmail);
+  
+  if (!sanitizedEmail) {
+    return res.status(400).json({ error: "Valid email is required for checkout" });
   }
+  
+  const email = sanitizedEmail;
 
   if (!req.user && isDisposableEmail(email)) {
     return res.status(403).json({ error: "Disposable email domains are not allowed" });
@@ -344,12 +350,17 @@ export const confirmMockMenuCheckout = async (req: Request, res: Response): Prom
   const typedReq = req as AuthenticatedRequest;
   const userId = typedReq.user?.id ?? null;
   const sessionId = !userId && typedReq.sessionId ? typedReq.sessionId : null;
-  const email = typedReq.user?.email ?? typedReq.body?.email;
+  
+  // Sanitize email input
+  const rawEmail = typedReq.user?.email ?? typedReq.body?.email;
+  const sanitizedEmail = sanitizeInput(rawEmail);
   const transactionId = typedReq.body.transactionId;
 
-  if (!email || !transactionId) {
-    return res.status(400).json({ error: "Missing email or transaction ID" });
+  if (!sanitizedEmail || !transactionId) {
+    return res.status(400).json({ error: "Missing valid email or transaction ID" });
   }
+  
+  const email = sanitizedEmail;
 
   const wompiResponse = await mockValidateWompiTransaction(transactionId);
   if (!wompiResponse.approved) {

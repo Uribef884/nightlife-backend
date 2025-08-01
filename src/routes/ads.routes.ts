@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware';
 import { upload } from '../middlewares/uploadMiddleware';
 import {
-  createAdminAd,
+  createAdminAdGlobal,
   createClubAd,
   updateAd,
   deleteAd,
@@ -11,12 +11,11 @@ import {
   getMyClubAds
 } from '../controllers/ad.controller';
 import { isAdmin } from '../middlewares/isAdmin';
-import { requireBouncerOrClubOwner } from '../middlewares/requireBouncerOrClubOwner';
 
 const router = Router();
 
 // POST /ads/global (admin, multipart/form-data)
-router.post('/global', authMiddleware, isAdmin, upload.single('image'), createAdminAd);
+router.post('/global', authMiddleware, isAdmin, upload.single('image'), createAdminAdGlobal);
 
 // POST /ads/club (club owner, multipart/form-data)
 router.post('/club', authMiddleware, upload.single('image'), createClubAd);

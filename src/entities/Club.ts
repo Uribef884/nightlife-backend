@@ -103,6 +103,15 @@ export class Club {
   @UpdateDateColumn()
   updatedAt!: Date;
 
+  @Column({ default: true })
+  isActive!: boolean;
+
+  @Column({ default: false })
+  isDeleted!: boolean;
+
+  @Column({ type: "timestamp", nullable: true })
+  deletedAt?: Date;
+
   @OneToMany(() => Event, (event) => event.club)
   events!: Event[];
 

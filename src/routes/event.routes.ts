@@ -11,6 +11,7 @@ import {
 } from "../controllers/event.controller";
 import { authMiddleware } from "../middlewares/authMiddleware";
 import { upload } from "../middlewares/uploadMiddleware";
+import { createLimiter } from "../middlewares/rateLimiter";
 
 const router = Router();
 
@@ -20,7 +21,7 @@ router.get("/club/:clubId", getEventsByClubId);   // GET /events/club/:clubId
 
 // 🔐 Club Owner routes
 router.get("/my-club", authMiddleware, getMyClubEvents); // GET /events/my-club
-router.post("/", authMiddleware, upload.single('image'), createEvent);   // POST /events
+router.post("/", createLimiter, authMiddleware, upload.single('image'), createEvent);   // POST /events
 router.put("/:id", authMiddleware, updateEvent);   // PUT /events/:id
 router.put("/:id/image", authMiddleware, upload.single('image'), updateEventImage);   // PUT /events/:id/image
 router.patch("/:id/toggle-visibility", authMiddleware, toggleEventVisibility);   // PATCH /events/:id/toggle-visibility

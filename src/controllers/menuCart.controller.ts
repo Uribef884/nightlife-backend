@@ -89,6 +89,28 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
       }
     }
 
+    // Check maxPerPerson based on whether item has variants
+    if (menuItem.hasVariants) {
+      // For items with variants, check the variant's maxPerPerson
+      if (variantId) {
+        const variant = menuItem.variants.find(v => v.id === variantId);
+        if (variant && variant.maxPerPerson && quantity > variant.maxPerPerson) {
+          res.status(400).json({
+            error: `Max per person for variant "${variant.name}" is ${variant.maxPerPerson}`
+          });
+          return;
+        }
+      }
+    } else {
+      // For items without variants, check the parent's maxPerPerson
+      if (menuItem.maxPerPerson && quantity > menuItem.maxPerPerson) {
+        res.status(400).json({
+          error: `Max per person for this item is ${menuItem.maxPerPerson}`
+        });
+        return;
+      }
+    }
+
     const basePrice = menuItem.hasVariants
       ? menuItem.variants.find(v => v.id === variantId)?.price ?? 0
       : menuItem.price!;
@@ -101,6 +123,27 @@ export const addToMenuCart = async (req: AuthenticatedRequest, res: Response): P
 
     if (existing) {
       const newTotal = existing.quantity + quantity;
+      
+      // Check maxPerPerson again for existing items
+      if (menuItem.hasVariants) {
+        if (variantId) {
+          const variant = menuItem.variants.find(v => v.id === variantId);
+          if (variant && variant.maxPerPerson && newTotal > variant.maxPerPerson) {
+            res.status(400).json({
+              error: `Max per person for variant "${variant.name}" is ${variant.maxPerPerson}`
+            });
+            return;
+          }
+        }
+      } else {
+        if (menuItem.maxPerPerson && newTotal > menuItem.maxPerPerson) {
+          res.status(400).json({
+            error: `Max per person for this item is ${menuItem.maxPerPerson}`
+          });
+          return;
+        }
+      }
+      
       existing.quantity = newTotal;
       await cartRepo.save(existing);
       res.json(existing);
@@ -155,17 +198,35 @@ export const updateMenuCartItem = async (req: AuthenticatedRequest, res: Respons
       return;
     }
 
-    const menuItem = await itemRepo.findOne({ where: { id: cartItem.menuItemId } });
+    const menuItem = await itemRepo.findOne({ 
+      where: { id: cartItem.menuItemId },
+      relations: ["variants"]
+    });
     if (!menuItem || !menuItem.isActive) {
       res.status(400).json({ error: "Item no longer available" });
       return;
     }
 
-    if (menuItem.maxPerPerson && quantity > menuItem.maxPerPerson) {
-      res.status(400).json({
-        error: `Max per person for this item is ${menuItem.maxPerPerson}`
-      });
-      return;
+    // Check maxPerPerson based on whether item has variants
+    if (menuItem.hasVariants) {
+      // For items with variants, check the variant's maxPerPerson
+      if (cartItem.variantId) {
+        const variant = menuItem.variants.find(v => v.id === cartItem.variantId);
+        if (variant && variant.maxPerPerson && quantity > variant.maxPerPerson) {
+          res.status(400).json({
+            error: `Max per person for variant "${variant.name}" is ${variant.maxPerPerson}`
+          });
+          return;
+        }
+      }
+    } else {
+      // For items without variants, check the parent's maxPerPerson
+      if (menuItem.maxPerPerson && quantity > menuItem.maxPerPerson) {
+        res.status(400).json({
+          error: `Max per person for this item is ${menuItem.maxPerPerson}`
+        });
+        return;
+      }
     }
 
     cartItem.quantity = quantity;

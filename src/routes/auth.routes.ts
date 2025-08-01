@@ -17,13 +17,13 @@ import { isAdmin } from "../middlewares/isAdmin";
 import { requireAuth } from "../middlewares/requireAuth";
 import { honeypotMiddleware } from "../middlewares/honeypotMiddleware";
 import { validateAuthInput } from "../middlewares/validateAuthInput";
-import { rateLimiter } from "../middlewares/rateLimiter";
+import { rateLimiter, loginLimiter } from "../middlewares/rateLimiter";
 
 const router = Router();
 
 // Public routes
 router.post("/register", rateLimiter, honeypotMiddleware, validateAuthInput(), register);
-router.post("/login", rateLimiter, honeypotMiddleware, validateAuthInput(), login);
+router.post("/login", loginLimiter, honeypotMiddleware, validateAuthInput(), login);
 
 // ✅ Forgot/reset password
 router.post("/forgot-password", rateLimiter, honeypotMiddleware, forgotPassword);

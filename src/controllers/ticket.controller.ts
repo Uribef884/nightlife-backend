@@ -10,6 +10,7 @@ import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
 import { MenuItem } from "../entities/MenuItem";
 import { MenuItemVariant } from "../entities/MenuItemVariant";
 import { computeDynamicPrice, computeDynamicEventPrice, getEventTicketDynamicPricingReason } from "../utils/dynamicPricing";
+import { sanitizeInput, sanitizeObject } from "../utils/sanitizeInput";
 
 // Utility to normalize today's date
 const getTodayISO = (): string => {
@@ -31,6 +32,11 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       return;
     }
 
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name', 'description', 'clubId'
+    ], { maxLength: 500 });
+
     const {
       name,
       description,
@@ -45,7 +51,7 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       dynamicPricingEnabled, // <-- add this to destructuring
       includesMenuItem,
       menuItems, // Array of menu items to include
-    } = req.body;
+    } = sanitizedBody;
 
     if (!name || price == null || maxPerPerson == null || priority == null || !category) {
       res.status(400).json({ error: "Missing required fields" });
@@ -167,6 +173,29 @@ export async function createTicket(req: Request, res: Response): Promise<void> {
       const menuItemRepo = queryRunner.manager.getRepository(MenuItem);
       const menuItemVariantRepo = queryRunner.manager.getRepository(MenuItemVariant);
 
+      // Check for duplicates within the menuItems array
+      const seenCombinations = new Set();
+      const duplicates = [];
+
+      for (const menuItem of menuItems) {
+        const { menuItemId, variantId } = menuItem;
+        const combination = `${menuItemId}-${variantId || 'null'}`;
+        
+        if (seenCombinations.has(combination)) {
+          duplicates.push(combination);
+        } else {
+          seenCombinations.add(combination);
+        }
+      }
+
+      if (duplicates.length > 0) {
+        res.status(400).json({ 
+          error: "Duplicate menu items found in the request. Each menu item can only be included once per ticket." 
+        });
+        await queryRunner.rollbackTransaction();
+        return;
+      }
+
       const menuItemRecords = [];
 
       for (const menuItem of menuItems) {
@@ -269,7 +298,13 @@ export const updateTicket = async (req: Request, res: Response): Promise<void> =
   }
 
   const { id } = req.params;
-  const updates = req.body;
+  
+  // Sanitize all string inputs
+  const sanitizedUpdates = sanitizeObject(req.body, [
+    'name', 'description'
+  ], { maxLength: 500 });
+  
+  const updates = sanitizedUpdates;
 
   const ticketRepo = AppDataSource.getRepository(Ticket);
   const purchaseRepo = AppDataSource.getRepository(TicketPurchase);

@@ -3,11 +3,22 @@ import { AppDataSource } from "../config/data-source";
 import { Club } from "../entities/Club";
 import { User } from "../entities/User";
 import { AuthenticatedRequest } from "../types/express"; 
+import { TicketPurchase } from "../entities/TicketPurchase";
+import { MenuPurchase } from "../entities/MenuPurchase";
+import { validateImageUrlWithResponse } from "../utils/validateImageUrl";
+import { sanitizeInput, sanitizeObject } from "../utils/sanitizeInput";
 
 // CREATE CLUB
 export async function createClub(req: AuthenticatedRequest, res: Response): Promise<void> {
   const repo = AppDataSource.getRepository(Club);
   const userRepo = AppDataSource.getRepository(User);
+
+  // Sanitize all string inputs
+  const sanitizedBody = sanitizeObject(req.body, [
+    'name', 'description', 'address', 'city', 'googleMaps', 
+    'musicType', 'instagram', 'whatsapp', 'dressCode', 
+    'extraInfo', 'profileImageUrl', 'profileImageBlurhash'
+  ], { maxLength: 1000 });
 
   const {
     name,
@@ -29,7 +40,12 @@ export async function createClub(req: AuthenticatedRequest, res: Response): Prom
     latitude,
     longitude,
     ownerId,
-  } = req.body;
+  } = sanitizedBody;
+
+  // Validate image URLs
+  if (profileImageUrl && !validateImageUrlWithResponse(profileImageUrl, res)) {
+    return;
+  }
 
   const admin = req.user;
   if (!admin || admin.role !== "admin") {
@@ -111,10 +127,12 @@ export async function createClub(req: AuthenticatedRequest, res: Response): Prom
 
   await repo.save(club);
 
+  // Update user's role and clubId
   if (owner.role === "user") {
     owner.role = "clubowner";
-    await userRepo.save(owner);
   }
+  owner.clubId = club.id;
+  await userRepo.save(owner);
 
   res.status(201).json(club);
 }
@@ -123,6 +141,7 @@ export async function createClub(req: AuthenticatedRequest, res: Response): Prom
 export async function updateClub(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const repo = AppDataSource.getRepository(Club);
+    const userRepo = AppDataSource.getRepository(User);
     const { id } = req.params;
     const user = req.user;
 
@@ -138,8 +157,23 @@ export async function updateClub(req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name', 'description', 'address', 'city', 'googleMaps', 
+      'musicType', 'instagram', 'whatsapp', 'dressCode', 
+      'extraInfo', 'profileImageUrl', 'profileImageBlurhash', 'pdfMenuUrl'
+    ], { maxLength: 1000 });
+
     // --- VALIDATION FOR openDays and openHours (if present in update) ---
-    const { openDays, openHours } = req.body;
+    const { openDays, openHours, ownerId, profileImageUrl, pdfMenuUrl } = sanitizedBody;
+
+    // Validate image URLs
+    if (profileImageUrl && !validateImageUrlWithResponse(profileImageUrl, res)) {
+      return;
+    }
+    if (pdfMenuUrl && !validateImageUrlWithResponse(pdfMenuUrl, res)) {
+      return;
+    }
     if (openDays !== undefined) {
       if (!Array.isArray(openDays) || openDays.length === 0) {
         res.status(400).json({ error: "openDays must be a non-empty array of days" });
@@ -175,6 +209,52 @@ export async function updateClub(req: AuthenticatedRequest, res: Response): Prom
     }
     // --- END VALIDATION ---
 
+    // Handle owner change if provided
+    if (ownerId !== undefined && ownerId !== club.ownerId) {
+      // Validate new owner
+      if (!ownerId || typeof ownerId !== "string" || ownerId.trim() === "") {
+        res.status(400).json({ error: "Invalid ownerId provided" });
+        return;
+      }
+
+      const newOwner = await userRepo.findOneBy({ id: ownerId });
+      if (!newOwner) {
+        res.status(404).json({ error: "New owner user not found" });
+        return;
+      }
+
+      // Check if new owner is already an owner of another club
+      const existingClub = await repo.findOne({ where: { ownerId } });
+      if (existingClub && existingClub.id !== club.id) {
+        res.status(400).json({ error: "New owner is already an owner of another club" });
+        return;
+      }
+
+      // Update old owner's clubId and role
+      const oldOwner = club.owner;
+      if (oldOwner) {
+        // Use raw SQL to ensure NULL is set in database
+        await userRepo.query('UPDATE "user" SET "clubId" = NULL WHERE id = $1', [oldOwner.id]);
+        
+        // Only demote to user if they don't have other roles (like admin)
+        if (oldOwner.role === "clubowner") {
+          oldOwner.role = "user";
+          await userRepo.save(oldOwner);
+        }
+      }
+
+      // Update new owner's clubId and role
+      newOwner.clubId = club.id;
+      if (newOwner.role === "user") {
+        newOwner.role = "clubowner";
+      }
+      await userRepo.save(newOwner);
+
+      // Update club's owner
+      club.owner = newOwner;
+      club.ownerId = newOwner.id;
+    }
+
     const { priority, ...allowedUpdates } = req.body;
 
     if (priority && priority < 1) {
@@ -182,6 +262,9 @@ export async function updateClub(req: AuthenticatedRequest, res: Response): Prom
     } else if (priority) {
       allowedUpdates.priority = priority;
     }
+
+    // Remove ownerId from allowedUpdates since we handle it separately
+    delete allowedUpdates.ownerId;
 
     repo.merge(club, allowedUpdates);
     const updated = await repo.save(club);
@@ -209,18 +292,36 @@ export async function updateMyClub(req: AuthenticatedRequest, res: Response): Pr
       return;
     }
 
-    const club = await repo.findOne({ where: { id: user.clubId }, relations: ["owner"] });
+    const club = await repo.findOne({ 
+      where: { id: user.clubId, isActive: true, isDeleted: false }, 
+      relations: ["owner"] 
+    });
     if (!club) {
       res.status(404).json({ error: "Club not found" });
       return;
     }
 
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name', 'description', 'address', 'city', 'googleMaps', 
+      'musicType', 'instagram', 'whatsapp', 'dressCode', 
+      'extraInfo', 'profileImageUrl', 'profileImageBlurhash', 'pdfMenuUrl'
+    ], { maxLength: 1000 });
+
     // --- VALIDATION FOR openDays and openHours (if present in update) ---
-    const { openDays, openHours, ownerId, ...allowedUpdates } = req.body;
+    const { openDays, openHours, ownerId, profileImageUrl, pdfMenuUrl, ...allowedUpdates } = sanitizedBody;
     
     // Prevent club owners from updating ownerId
     if (ownerId !== undefined) {
       res.status(403).json({ error: "Club owners cannot update the ownerId field" });
+      return;
+    }
+
+    // Validate image URLs
+    if (profileImageUrl && !validateImageUrlWithResponse(profileImageUrl, res)) {
+      return;
+    }
+    if (pdfMenuUrl && !validateImageUrlWithResponse(pdfMenuUrl, res)) {
       return;
     }
 
@@ -301,8 +402,44 @@ export async function deleteClub(req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
-    await repo.remove(club);
-    res.status(200).json({ message: "Club deleted successfully" }); // 👈 changed from 204
+    // Check if club has any related purchases
+    const ticketPurchaseRepo = AppDataSource.getRepository(TicketPurchase);
+    const menuPurchaseRepo = AppDataSource.getRepository(MenuPurchase);
+    
+    // Check for ticket purchases
+    const ticketPurchaseCount = await ticketPurchaseRepo.count({
+      where: { clubId: id }
+    });
+    
+    // Check for menu purchases
+    const menuPurchaseCount = await menuPurchaseRepo.count({
+      where: { clubId: id }
+    });
+    
+    const hasPurchases = ticketPurchaseCount > 0 || menuPurchaseCount > 0;
+
+    if (hasPurchases) {
+      // Soft delete - mark as deleted but keep the record
+      club.isDeleted = true;
+      club.deletedAt = new Date();
+      club.isActive = false; // Also deactivate to prevent new usage
+      await repo.save(club);
+
+      res.json({ 
+        message: "Club soft deleted successfully", 
+        deletedAt: club.deletedAt,
+        ticketPurchaseCount,
+        menuPurchaseCount,
+        note: "Club marked as deleted but preserved due to existing purchases"
+      });
+    } else {
+      // Hard delete - no associated purchases, safe to completely remove
+      await repo.remove(club);
+      res.json({ 
+        message: "Club permanently deleted successfully",
+        note: "No associated purchases found, club completely removed"
+      });
+    }
   } catch (error) {
     console.error("❌ Error deleting club:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -313,6 +450,7 @@ export async function getAllClubs(req: Request, res: Response): Promise<void> {
   try {
     const repo = AppDataSource.getRepository(Club);
     const clubs = await repo.find({
+      where: { isActive: true, isDeleted: false },
       order: { priority: "ASC" }
     });
 
@@ -350,7 +488,10 @@ export async function getClubById(req: AuthenticatedRequest, res: Response): Pro
     const user = req.user;
     const repo = AppDataSource.getRepository(Club);
 
-    const club = await repo.findOne({ where: { id }, relations: ["owner"] });
+    const club = await repo.findOne({ 
+      where: { id, isActive: true, isDeleted: false }, 
+      relations: ["owner"] 
+    });
 
     if (!club) {
       res.status(404).json({ error: "Club not found" });
@@ -411,6 +552,10 @@ export async function getFilteredClubs(req: Request, res: Response): Promise<voi
   try {
     const repo = AppDataSource.getRepository(Club);
     const queryBuilder = repo.createQueryBuilder("club");
+
+    // Filter out soft-deleted clubs
+    queryBuilder.andWhere("club.isActive = :isActive", { isActive: true });
+    queryBuilder.andWhere("club.isDeleted = :isDeleted", { isDeleted: false });
 
     const { query, city, musicType, openDays } = req.query;
 

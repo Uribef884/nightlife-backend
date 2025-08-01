@@ -15,6 +15,9 @@ export class MenuItemVariant {
   @Column({ default: true })
   dynamicPricingEnabled!: boolean;
 
+  @Column("int", { nullable: true })
+  maxPerPerson?: number;
+
   @Column()
   menuItemId!: string;
 

@@ -7,6 +7,7 @@ import { Club } from '../entities/Club';
 import { MenuItem } from '../entities/MenuItem';
 import { Event } from '../entities/Event';
 import { Ad } from "../entities/Ad";
+import { validateImageUrlWithResponse } from '../utils/validateImageUrl';
 
 // Upload menu PDF
 export const uploadMenuPdf = async (req: AuthenticatedRequest, res: Response): Promise<void> => {

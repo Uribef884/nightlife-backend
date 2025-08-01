@@ -13,6 +13,7 @@ import { forgotPasswordSchema, resetPasswordSchema } from "../schemas/forgot.sch
 import { sendPasswordResetEmail } from "../services/emailService"; 
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { OAuthService, GoogleUserInfo } from "../services/oauthService";
+import { sanitizeInput } from "../utils/sanitizeInput";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 const RESET_SECRET = process.env.RESET_SECRET || "dev-reset-secret";
@@ -20,8 +21,15 @@ const RESET_EXPIRY = "15m";
 
 export async function register(req: Request, res: Response): Promise<void> {
   try {
-    const email = req.body.email?.toLowerCase().trim();
+    const sanitizedEmail = sanitizeInput(req.body.email?.toLowerCase().trim());
     const password = req.body.password;
+    
+    if (!sanitizedEmail) {
+      res.status(400).json({ error: "Invalid email format" });
+      return;
+    }
+    
+    const email = sanitizedEmail;
 
     const result = authSchemaRegister.safeParse({ email, password });
 
@@ -68,8 +76,15 @@ export async function register(req: Request, res: Response): Promise<void> {
 }
 
 export async function login(req: Request, res: Response): Promise<void> {
-  const email = req.body.email?.toLowerCase().trim();
+  const sanitizedEmail = sanitizeInput(req.body.email?.toLowerCase().trim());
   const password = req.body.password;
+  
+  if (!sanitizedEmail) {
+    res.status(400).json({ error: "Invalid email format" });
+    return;
+  }
+  
+  const email = sanitizedEmail;
 
   if (!email || !password) {
     res.status(401).json({ error: "Invalid credentials" });

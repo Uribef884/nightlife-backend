@@ -11,6 +11,7 @@ import {
   toggleMenuItemDynamicPricing
 } from "../controllers/menuItem.controller";
 import { authMiddleware, requireClubOwnerOrAdmin } from "../middlewares/authMiddleware";
+import { upload } from "../middlewares/uploadMiddleware";
 
 const router = Router();
 
@@ -22,7 +23,7 @@ router.get("/:id", getMenuItemById);
 
 // Clubowner routes
 router.get("/my/items", authMiddleware, requireClubOwnerOrAdmin, getItemsForMyClub);
-router.post("/", authMiddleware, requireClubOwnerOrAdmin, createMenuItem);
+router.post("/", authMiddleware, requireClubOwnerOrAdmin, upload.single('image'), createMenuItem);
 router.patch("/:id", authMiddleware, requireClubOwnerOrAdmin, updateMenuItem);
 router.delete("/:id", authMiddleware, requireClubOwnerOrAdmin, deleteMenuItem);
 router.patch('/:id/toggle-dynamic-pricing', authMiddleware, toggleMenuItemDynamicPricing);

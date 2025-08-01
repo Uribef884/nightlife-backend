@@ -6,12 +6,20 @@ import { AuthenticatedRequest } from "../types/express";
 import bcrypt from "bcrypt";
 import { authSchemaRegister } from "../schemas/auth.schema";
 import { isDisposableEmail } from "../utils/disposableEmailValidator";
+import { sanitizeInput } from "../utils/sanitizeInput";
 
 export const createWaiter = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    // Normalize email
-    const email = req.body.email?.toLowerCase().trim();
+    // Normalize and sanitize email
+    const sanitizedEmail = sanitizeInput(req.body.email?.toLowerCase().trim());
     const password = req.body.password;
+    
+    if (!sanitizedEmail) {
+      res.status(400).json({ error: "Invalid email format" });
+      return;
+    }
+    
+    const email = sanitizedEmail;
     const userRepo = AppDataSource.getRepository(User);
     const clubRepo = AppDataSource.getRepository(Club);
     const requester = req.user;

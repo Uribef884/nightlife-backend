@@ -9,11 +9,12 @@ import {
   getFilteredClubs, // ✅ Added
 } from "../controllers/club.controller";
 import { authMiddleware, requireAdminAuth, requireClubOwnerAuth } from "../middlewares/authMiddleware";
+import { searchLimiter } from "../middlewares/rateLimiter";
 
 const router = Router();
 
-router.get("/", getAllClubs);               // Public
-router.get("/filter", getFilteredClubs);    // ✅ New Filtered Route
+router.get("/", getAllClubs);               // Public - basic navigation, no rate limiting needed
+router.get("/filter", searchLimiter, getFilteredClubs);    // ✅ Search functionality with rate limiting
 router.get("/:id", getClubById);            // Public
 
 router.post("/", authMiddleware, requireAdminAuth, createClub); // Protected

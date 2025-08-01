@@ -5,7 +5,9 @@ import { Ticket } from "../entities/Ticket";
 import { Event } from "../entities/Event";
 import { S3Service } from "../services/s3Service";
 import { AuthenticatedRequest } from "../types/express";
-import { IsNull } from "typeorm";
+import { IsNull, In } from "typeorm";
+import { TicketPurchase } from "../entities/TicketPurchase";
+import { validateImageUrlWithResponse } from "../utils/validateImageUrl";
 
 function buildAdLink(ad: Ad): string | null {
   if (ad.targetType === "event" && ad.targetId) {
@@ -42,7 +44,7 @@ function validateTargetType(type: any): boolean {
 }
 
 // --- CREATE ADMIN AD ---
-export const createAdminAd = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const createAdminAdGlobal = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     if (req.user?.role !== "admin") {
       res.status(403).json({ error: "Only admins can create admin ads." });
@@ -199,7 +201,7 @@ export const updateAd = async (req: AuthenticatedRequest, res: Response): Promis
   try {
     const { id } = req.params;
     const adRepo = AppDataSource.getRepository(Ad);
-    const ad = await adRepo.findOne({ where: { id } });
+    const ad = await adRepo.findOne({ where: { id, isActive: true, isDeleted: false } });
     if (!ad) {
       res.status(404).json({ error: "Ad not found." });
       return;
@@ -214,7 +216,12 @@ export const updateAd = async (req: AuthenticatedRequest, res: Response): Promis
       return;
     }
     // Update fields
-    const { priority, isVisible, targetType, targetId } = req.body;
+    const { priority, isVisible, targetType, targetId, imageUrl } = req.body;
+
+    // Validate image URL if provided
+    if (imageUrl && !validateImageUrlWithResponse(imageUrl, res)) {
+      return;
+    }
     if (priority !== undefined) {
       const prio = parseInt(priority);
       if (!validatePriority(prio)) {
@@ -280,7 +287,7 @@ export const deleteAd = async (req: AuthenticatedRequest, res: Response): Promis
   try {
     const { id } = req.params;
     const adRepo = AppDataSource.getRepository(Ad);
-    const ad = await adRepo.findOne({ where: { id } });
+    const ad = await adRepo.findOne({ where: { id, isActive: true, isDeleted: false } });
     if (!ad) {
       res.status(404).json({ error: "Ad not found." });
       return;
@@ -294,15 +301,61 @@ export const deleteAd = async (req: AuthenticatedRequest, res: Response): Promis
       res.status(403).json({ error: "Only the club owner can delete this ad." });
       return;
     }
-    // Delete image from S3
-    try {
-      await S3Service.deleteFileByUrl(ad.imageUrl);
-    } catch (err) {
-      console.error("Error deleting ad image from S3:", err);
+
+    // Check if ad has any related purchases (tickets or events)
+    let hasRelatedPurchases = false;
+    
+    if (ad.targetType === "ticket" && ad.targetId) {
+      // Check if the targeted ticket has purchases
+      const ticketPurchaseRepo = AppDataSource.getRepository(TicketPurchase);
+      const purchaseCount = await ticketPurchaseRepo.count({
+        where: { ticketId: ad.targetId }
+      });
+      hasRelatedPurchases = purchaseCount > 0;
+    } else if (ad.targetType === "event" && ad.targetId) {
+      // Check if the targeted event has tickets with purchases
+      const ticketRepo = AppDataSource.getRepository(Ticket);
+      const ticketPurchaseRepo = AppDataSource.getRepository(TicketPurchase);
+      
+      const eventTickets = await ticketRepo.find({ where: { eventId: ad.targetId } });
+      const ticketIds = eventTickets.map(ticket => ticket.id);
+      
+      if (ticketIds.length > 0) {
+        const purchaseCount = await ticketPurchaseRepo.count({
+          where: { ticketId: In(ticketIds) }
+        });
+        hasRelatedPurchases = purchaseCount > 0;
+      }
     }
-    // Delete ad from DB
-    await adRepo.remove(ad);
-    res.json({ message: "Ad deleted successfully." });
+
+    if (hasRelatedPurchases) {
+      // Soft delete - mark as deleted but keep the record
+      ad.isDeleted = true;
+      ad.deletedAt = new Date();
+      ad.isActive = false; // Also deactivate to prevent new usage
+      await adRepo.save(ad);
+
+      res.json({ 
+        message: "Ad soft deleted successfully", 
+        deletedAt: ad.deletedAt,
+        hasRelatedPurchases,
+        note: "Ad marked as deleted but preserved due to existing purchases"
+      });
+    } else {
+      // Hard delete - no related purchases, safe to completely remove
+      // Delete image from S3
+      try {
+        await S3Service.deleteFileByUrl(ad.imageUrl);
+      } catch (err) {
+        console.error("Error deleting ad image from S3:", err);
+      }
+      // Delete ad from DB
+      await adRepo.remove(ad);
+      res.json({ 
+        message: "Ad permanently deleted successfully",
+        note: "No related purchases found, ad completely removed"
+      });
+    }
   } catch (error) {
     console.error("Error deleting ad:", error);
     res.status(500).json({ error: "Failed to delete ad." });
@@ -313,7 +366,10 @@ export const deleteAd = async (req: AuthenticatedRequest, res: Response): Promis
 export const getGlobalAds = async (req: Request, res: Response): Promise<void> => {
   try {
     const adRepo = AppDataSource.getRepository(Ad);
-    const ads = await adRepo.find({ where: { clubId: IsNull() }, order: { priority: "DESC", createdAt: "DESC" } });
+    const ads = await adRepo.find({ 
+      where: { clubId: IsNull(), isActive: true, isDeleted: false }, 
+      order: { priority: "DESC", createdAt: "DESC" } 
+    });
     res.json(ads.map(adToResponse));
   } catch (error) {
     console.error("Error fetching global ads:", error);
@@ -326,7 +382,10 @@ export const getClubAds = async (req: Request, res: Response): Promise<void> => 
   try {
     const { clubId } = req.params;
     const adRepo = AppDataSource.getRepository(Ad);
-    const ads = await adRepo.find({ where: { clubId }, order: { priority: "DESC", createdAt: "DESC" } });
+    const ads = await adRepo.find({ 
+      where: { clubId, isActive: true, isDeleted: false }, 
+      order: { priority: "DESC", createdAt: "DESC" } 
+    });
     res.json(ads.map(adToResponse));
   } catch (error) {
     console.error("Error fetching club ads:", error);
@@ -347,7 +406,10 @@ export const getMyClubAds = async (req: AuthenticatedRequest, res: Response): Pr
       return;
     }
     const adRepo = AppDataSource.getRepository(Ad);
-    const ads = await adRepo.find({ where: { clubId }, order: { priority: "DESC", createdAt: "DESC" } });
+    const ads = await adRepo.find({ 
+      where: { clubId, isActive: true, isDeleted: false }, 
+      order: { priority: "DESC", createdAt: "DESC" } 
+    });
     res.json(ads.map(adToResponse));
   } catch (error) {
     console.error("Error fetching my club ads:", error);

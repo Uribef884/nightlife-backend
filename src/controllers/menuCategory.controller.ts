@@ -3,13 +3,16 @@ import { AppDataSource } from "../config/data-source";
 import { MenuCategory } from "../entities/MenuCategory";
 import { MenuItem } from "../entities/MenuItem";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
-import { sanitizeInput } from "../utils/sanitizeInput";
+import { sanitizeInput, sanitizeObject } from "../utils/sanitizeInput";
 import { AuthenticatedRequest } from "../types/express";
+import { In } from "typeorm";
+import { MenuPurchase } from "../entities/MenuPurchase";
 
 export const getAllMenuCategories = async (req: Request, res: Response) => {
   try {
     const repo = AppDataSource.getRepository(MenuCategory);
     const categories = await repo.find({
+      where: { isActive: true, isDeleted: false },
       relations: ["items", "items.variants", "items.club"]
     });
 
@@ -83,7 +86,12 @@ export const getAllMenuCategories = async (req: Request, res: Response) => {
 
 export const createMenuCategory = async (req: Request, res: Response): Promise<void>  => {
   try {
-    const { name } = req.body;
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name'
+    ], { maxLength: 100 });
+    
+    const { name } = sanitizedBody;
     const user = req.user;
 
     if (!user || user.role !== "clubowner") {
@@ -96,14 +104,13 @@ export const createMenuCategory = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    const sanitized = sanitizeInput(name);
-    if (!sanitized) {
+    if (!name) {
       res.status(400).json({ error: "Name is required" });
       return;
     }
 
     const newCategory = new MenuCategory();
-    newCategory.name = sanitized;
+    newCategory.name = name;
     newCategory.clubId = user.clubId;
 
     const repo = AppDataSource.getRepository(MenuCategory);
@@ -119,7 +126,13 @@ export const createMenuCategory = async (req: Request, res: Response): Promise<v
 export const updateMenuCategory = async (req: Request, res: Response): Promise<void>  => {
   try {
     const { id } = req.params;
-    const { name } = req.body;
+    
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name'
+    ], { maxLength: 100 });
+    
+    const { name } = sanitizedBody;
     const user = req.user;
 
     if (!user || user.role !== "clubowner") {
@@ -128,20 +141,24 @@ export const updateMenuCategory = async (req: Request, res: Response): Promise<v
     }
 
     const repo = AppDataSource.getRepository(MenuCategory);
-    const category = await repo.findOne({ where: { id }, relations: ["club"] });
+    const category = await repo.findOne({ 
+      where: { id, isActive: true, isDeleted: false }, 
+      relations: ["club"] 
+    });
 
     if (!category || category.club.id !== user.clubId) {
       res.status(403).json({ error: "You can only update your own categories" });
       return;
     }
 
-    const sanitized = sanitizeInput(name);
-    if (!sanitized) {
-      res.status(400).json({ error: "Name is required" });
-      return;
+    if (name !== undefined) {
+      if (!name) {
+        res.status(400).json({ error: "Name is required" });
+        return;
+      }
+      category.name = name;
     }
 
-    category.name = sanitized;
     await repo.save(category);
 
     res.json(category);
@@ -162,15 +179,54 @@ export const deleteMenuCategory = async (req: Request, res: Response): Promise<v
     }
 
     const repo = AppDataSource.getRepository(MenuCategory);
-    const category = await repo.findOne({ where: { id }, relations: ["club"] });
+    const category = await repo.findOne({ 
+      where: { id, isActive: true, isDeleted: false }, 
+      relations: ["club"] 
+    });
 
     if (!category || category.club.id !== user.clubId) {
       res.status(403).json({ error: "You can only delete your own categories" });
       return;
     }
 
-    await repo.remove(category);
-    res.status(204).send();
+    // Check if category has any menu items with purchases
+    const menuItemRepo = AppDataSource.getRepository(MenuItem);
+    const menuPurchaseRepo = AppDataSource.getRepository(MenuPurchase);
+    
+    // Get all menu items in this category
+    const menuItems = await menuItemRepo.find({ where: { categoryId: id } });
+    const menuItemIds = menuItems.map(item => item.id);
+    
+    // Check if any menu items have purchases
+    let hasPurchases = false;
+    if (menuItemIds.length > 0) {
+      const purchaseCount = await menuPurchaseRepo.count({
+        where: { menuItemId: In(menuItemIds) }
+      });
+      hasPurchases = purchaseCount > 0;
+    }
+
+    if (hasPurchases) {
+      // Soft delete - mark as deleted but keep the record
+      category.isDeleted = true;
+      category.deletedAt = new Date();
+      category.isActive = false; // Also deactivate to prevent new usage
+      await repo.save(category);
+
+      res.json({ 
+        message: "Category soft deleted successfully", 
+        deletedAt: category.deletedAt,
+        hasPurchases,
+        note: "Category marked as deleted but preserved due to existing purchases"
+      });
+    } else {
+      // Hard delete - no associated purchases, safe to completely remove
+      await repo.remove(category);
+      res.json({ 
+        message: "Category permanently deleted successfully",
+        note: "No associated purchases found, category completely removed"
+      });
+    }
   } catch (err) {
     console.error("Error deleting category:", err);
     res.status(500).json({ error: "Server error deleting category" });

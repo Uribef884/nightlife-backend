@@ -7,22 +7,33 @@ import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
 import { MenuPurchase } from "../entities/MenuPurchase";
 import { Club } from "../entities/Club";
 import { AuthenticatedRequest } from "../types/express";
-import { sanitizeInput } from "../utils/sanitizeInput";
+import { sanitizeInput, sanitizeObject } from "../utils/sanitizeInput";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
+import { validateImageUrlWithResponse } from "../utils/validateImageUrl";
 
 export const createMenuItem = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const user = req.user;
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name', 'description'
+    ], { maxLength: 500 });
+    
     const {
       name,
       description,
-      imageUrl,
       price,
       maxPerPerson,
       hasVariants,
       categoryId,
       dynamicPricingEnabled
-    } = req.body;
+    } = sanitizedBody;
+
+    // Parse boolean values from form data
+    const hasVariantsBool = hasVariants === "true" || hasVariants === true;
+    const dynamicPricingEnabledBool = dynamicPricingEnabled === "true" || dynamicPricingEnabled === true;
+    const priceNum = price && price !== "" ? Number(price) : undefined;
+    const maxPerPersonNum = maxPerPerson && maxPerPerson !== "" ? Number(maxPerPerson) : undefined;
 
     if (!user || user.role !== "clubowner") {
       res.status(403).json({ error: "Only club owners can create menu items" });
@@ -45,8 +56,7 @@ export const createMenuItem = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    const sanitizedName = sanitizeInput(name);
-    if (!sanitizedName) {
+    if (!name) {
       res.status(400).json({ error: "Name is required" });
       return;
     }
@@ -61,46 +71,72 @@ export const createMenuItem = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    if (hasVariants && price !== null) {
+    if (hasVariantsBool && priceNum !== null && priceNum !== undefined) {
       res.status(400).json({ error: "Price must be null when hasVariants is true" });
       return;
     }
 
-    if (!hasVariants && (typeof price !== "number" || price <= 0)) {
+    if (!hasVariantsBool && (typeof priceNum !== "number" || priceNum <= 0)) {
       res.status(400).json({ error: "Price must be a positive number if hasVariants is false" });
       return;
     }
 
-    if (typeof maxPerPerson !== "number" || maxPerPerson <= 0) {
-      res.status(400).json({ error: "maxPerPerson must be a positive number" });
+    if (hasVariantsBool && maxPerPersonNum !== null && maxPerPersonNum !== undefined) {
+      res.status(400).json({ error: "maxPerPerson must be null when hasVariants is true" });
+      return;
+    }
+
+    if (!hasVariantsBool && (typeof maxPerPersonNum !== "number" || maxPerPersonNum <= 0)) {
+      res.status(400).json({ error: "maxPerPerson must be a positive number if hasVariants is false" });
       return;
     }
 
     // Enforce that parent menu items with variants cannot have dynamic pricing enabled
-    if (hasVariants && dynamicPricingEnabled) {
+    if (hasVariantsBool && dynamicPricingEnabledBool) {
       res.status(400).json({ 
         error: "Parent menu items with variants cannot have dynamic pricing enabled. Dynamic pricing should be configured on individual variants instead." 
       });
       return;
     }
 
+    // Validate image file
+    if (!req.file) {
+      res.status(400).json({ error: "Image file is required." });
+      return;
+    }
+
+    // Process image
+    const processed = await (await import("../services/imageService")).ImageService.processImage(req.file.buffer);
+
+    // Create menu item
+    const itemRepo = AppDataSource.getRepository(MenuItem);
     const item = new MenuItem();
-    item.name = sanitizedName;
-    item.description = sanitizeInput(description) ?? undefined;
-    item.imageUrl = imageUrl ?? null;
-    item.price = hasVariants ? null : price;
-    item.hasVariants = hasVariants;
-    item.maxPerPerson = maxPerPerson;
-    // Force dynamic pricing to false for parent items with variants
-    item.dynamicPricingEnabled = hasVariants ? false : !!dynamicPricingEnabled;
-    item.clubId = user.clubId;
+    item.name = name;
+    item.description = description ?? undefined;
+    item.price = hasVariantsBool ? undefined : priceNum;
+    item.maxPerPerson = hasVariantsBool ? undefined : maxPerPersonNum;
+    item.hasVariants = hasVariantsBool;
+    item.dynamicPricingEnabled = dynamicPricingEnabledBool;
     item.categoryId = categoryId;
+    item.clubId = user.clubId;
+    item.imageUrl = ""; // will be set after upload
+    item.imageBlurhash = processed.blurhash;
     item.isActive = true;
 
-    await AppDataSource.getRepository(MenuItem).save(item);
+    await itemRepo.save(item);
+
+    // Upload image to S3
+    const { S3Service } = await import("../services/s3Service");
+    const key = S3Service.generateKey(user.clubId, 'menu-item');
+    const uploadResult = await S3Service.uploadFile(processed.buffer, 'image/jpeg', key);
+    
+    // Update item with image URL
+    item.imageUrl = uploadResult.url;
+    await itemRepo.save(item);
+
     res.status(201).json(item);
   } catch (err) {
-    console.error("Failed to create menu item:", err);
+    console.error("Error creating menu item:", err);
     res.status(500).json({ error: "Server error creating item" });
   }
 };
@@ -109,6 +145,12 @@ export const updateMenuItem = async (req: AuthenticatedRequest, res: Response): 
   try {
     const user = req.user;
     const { id } = req.params;
+    
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name', 'description', 'imageUrl'
+    ], { maxLength: 500 });
+    
     const {
       name,
       description,
@@ -117,7 +159,12 @@ export const updateMenuItem = async (req: AuthenticatedRequest, res: Response): 
       maxPerPerson,
       hasVariants,
       dynamicPricingEnabled
-    } = req.body;
+    } = sanitizedBody;
+
+    // Validate image URL if provided
+    if (imageUrl && !validateImageUrlWithResponse(imageUrl, res)) {
+      return;
+    }
 
     if (!user || user.role !== "clubowner") {
       res.status(403).json({ error: "Only club owners can update menu items" });
@@ -171,11 +218,22 @@ export const updateMenuItem = async (req: AuthenticatedRequest, res: Response): 
     }
 
     if (typeof maxPerPerson === "number") {
+      if (item.hasVariants) {
+        res.status(400).json({ error: "maxPerPerson must be null when hasVariants is true" });
+        return;
+      }
       if (maxPerPerson <= 0) {
         res.status(400).json({ error: "maxPerPerson must be positive" });
         return;
       }
       item.maxPerPerson = maxPerPerson;
+    } else if (maxPerPerson === null || maxPerPerson === undefined) {
+      // Allow setting maxPerPerson to null/undefined for items with variants
+      if (!item.hasVariants) {
+        res.status(400).json({ error: "maxPerPerson is required for items without variants" });
+        return;
+      }
+      item.maxPerPerson = undefined;
     }
 
     if (dynamicPricingEnabled !== undefined) {

@@ -7,17 +7,23 @@ import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { differenceInMinutes } from "date-fns";
 import { AuthenticatedRequest } from "../types/express";
 import { issueMockTransaction } from "../services/mockWompiService";
+import { sanitizeInput } from "../utils/sanitizeInput";
 
 // 🍊 POST /menu/initiate
 export const initiateMenuCheckout = async (req: Request, res: Response) => {
   const typedReq = req as AuthenticatedRequest;
   const userId = typedReq.user?.id ?? null;
   const sessionId: string | null = !userId && typedReq.sessionId ? typedReq.sessionId : null;
-  const email = typedReq.user?.email ?? typedReq.body?.email;
-
-  if (!email || typeof email !== "string") {
-    return res.status(400).json({ error: "Email is required to complete checkout." });
+  
+  // Sanitize email input
+  const rawEmail = typedReq.user?.email ?? typedReq.body?.email;
+  const sanitizedEmail = sanitizeInput(rawEmail);
+  
+  if (!sanitizedEmail) {
+    return res.status(400).json({ error: "Valid email is required to complete checkout." });
   }
+  
+  const email = sanitizedEmail;
 
   if (!req.user && isDisposableEmail(email)) {
     return res.status(403).json({ error: "Disposable email domains are not allowed." });

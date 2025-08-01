@@ -4,7 +4,7 @@ import { MenuItemVariant } from "../entities/MenuItemVariant";
 import { MenuItem } from "../entities/MenuItem";
 import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
 import { MenuPurchase } from "../entities/MenuPurchase";
-import { sanitizeInput } from "../utils/sanitizeInput";
+import { sanitizeInput, sanitizeObject } from "../utils/sanitizeInput";
 import { AuthenticatedRequest } from "../types/express";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { Club } from "../entities/Club";
@@ -53,12 +53,23 @@ export const createMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
       return;
     }
 
-    const { menuItemId, name, price, dynamicPricingEnabled } = req.body;
-    const sanitized = sanitizeInput(name);
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name'
+    ], { maxLength: 100 });
+    
+    const { menuItemId, name, price, dynamicPricingEnabled, maxPerPerson } = sanitizedBody;
 
-    if (!sanitized || typeof price !== "number" || price <= 0) {
+    if (!name || typeof price !== "number" || price <= 0) {
       res.status(400).json({ error: "Variant name and positive price are required" });
       return;
+    }
+
+    if (maxPerPerson !== undefined && maxPerPerson !== null) {
+      if (typeof maxPerPerson !== "number" || maxPerPerson <= 0) {
+        res.status(400).json({ error: "maxPerPerson must be a positive number" });
+        return;
+      }
     }
 
     const itemRepo = AppDataSource.getRepository(MenuItem);
@@ -70,18 +81,19 @@ export const createMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
       return;
     }
 
-    const existing = await variantRepo.findOne({ where: { name: sanitized, menuItemId } });
+    const existing = await variantRepo.findOne({ where: { name, menuItemId } });
     if (existing) {
       res.status(400).json({ error: "Variant name must be unique for this item" });
       return;
     }
 
     const variant = variantRepo.create({
-      name: sanitized,
+      name,
       price,
       menuItemId,
       isActive: true,
       dynamicPricingEnabled: dynamicPricingEnabled !== undefined ? !!dynamicPricingEnabled : true, // Default to true for variants
+      maxPerPerson: maxPerPerson || undefined,
     });
 
     await variantRepo.save(variant);
@@ -96,7 +108,13 @@ export const updateMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
   try {
     const user = req.user;
     const { id } = req.params;
-    const { name, price, isActive, dynamicPricingEnabled } = req.body;
+    
+    // Sanitize all string inputs
+    const sanitizedBody = sanitizeObject(req.body, [
+      'name'
+    ], { maxLength: 100 });
+    
+    const { name, price, isActive, dynamicPricingEnabled, maxPerPerson } = sanitizedBody;
 
     if (!user || user.role !== "clubowner") {
       res.status(403).json({ error: "Only club owners can update variants" });
@@ -120,18 +138,17 @@ export const updateMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
       return;
     }
 
-    if (typeof name === "string") {
-      const sanitized = sanitizeInput(name);
-      if (!sanitized) {
+    if (name !== undefined) {
+      if (!name) {
         res.status(400).json({ error: "Variant name is invalid" });
         return;
       }
-      const existing = await variantRepo.findOne({ where: { name: sanitized, menuItemId: menuItem.id } });
+      const existing = await variantRepo.findOne({ where: { name, menuItemId: menuItem.id } });
       if (existing && existing.id !== variant.id) {
         res.status(400).json({ error: "Variant name must be unique" });
         return;
       }
-      variant.name = sanitized;
+      variant.name = name;
     }
 
     if (price != null) {
@@ -149,6 +166,14 @@ export const updateMenuItemVariant = async (req: AuthenticatedRequest, res: Resp
 
     if (typeof dynamicPricingEnabled === "boolean") {
       variant.dynamicPricingEnabled = dynamicPricingEnabled;
+    }
+
+    if (maxPerPerson !== undefined) {
+      if (maxPerPerson !== null && (typeof maxPerPerson !== "number" || maxPerPerson <= 0)) {
+        res.status(400).json({ error: "maxPerPerson must be a positive number or null" });
+        return;
+      }
+      variant.maxPerPerson = maxPerPerson;
     }
 
     await variantRepo.save(variant);

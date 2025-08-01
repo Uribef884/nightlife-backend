@@ -51,6 +51,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https:", "blob:"],
     },
+
   },
 }));
 
@@ -100,3 +101,4 @@ AppDataSource.initialize()
   .catch((error: any) => {
     console.error("❌ DB connection failed:", error);
   });
+

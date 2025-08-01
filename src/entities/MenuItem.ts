@@ -42,8 +42,8 @@ export class MenuItem {
   @Column()
   categoryId!: string;
   
-  @Column("int")
-  maxPerPerson!: number;
+  @Column("int", { nullable: true })
+  maxPerPerson?: number;
 
   @ManyToOne(() => MenuCategory, (category) => category.items)
   category!: MenuCategory;

@@ -36,6 +36,7 @@
     "sharp": "^0.34.3",
     "typeorm": "^0.3.22",
     "uuid": "^11.1.0",
+    "validator": "^13.15.15",
     "zod": "^3.25.42"
   },
   "devDependencies": {
