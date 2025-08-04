@@ -1,6 +1,7 @@
-import { Request, Response, NextFunction } from "express";
+import { Response, NextFunction } from "express";
+import { AuthenticatedRequest } from "../types/express";
 
-export function isAdmin(req: Request, res: Response, next: NextFunction): void {
+export function isAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
     const user = req.user;
   
     if (!user || user.role !== "admin") {

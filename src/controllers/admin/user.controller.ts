@@ -1,12 +1,14 @@
 import { Request, Response } from "express";
 import { AppDataSource } from "../../config/data-source";
 import { User } from "../../entities/User";
+import { AuthenticatedRequest } from "../../types/express";
+import { sanitizeInput, sanitizeObject } from "../../utils/sanitizeInput";
 import { anonymizeUser, canUserBeDeleted } from "../../utils/anonymizeUser";
 
 /**
  * GET /admin/users - Get all users (admin only)
  */
-export async function getAllUsers(req: Request, res: Response): Promise<void> {
+export async function getAllUsers(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const userRepo = AppDataSource.getRepository(User);
     const users = await userRepo.find({
@@ -40,11 +42,19 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
 /**
  * GET /admin/users/:id - Get specific user details (admin only)
  */
-export async function getUserById(req: Request, res: Response): Promise<void> {
+export async function getUserById(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+    
+    // Sanitize the user ID
+    const sanitizedId = sanitizeInput(id);
+    if (!sanitizedId) {
+      res.status(400).json({ error: "Invalid user ID" });
+      return;
+    }
+
     const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOneBy({ id });
+    const user = await userRepo.findOneBy({ id: sanitizedId });
 
     if (!user) {
       res.status(404).json({ error: "User not found" });
@@ -74,12 +84,19 @@ export async function getUserById(req: Request, res: Response): Promise<void> {
 /**
  * DELETE /admin/users/:id - Delete user (admin only)
  */
-export async function deleteUser(req: Request, res: Response): Promise<void> {
+export async function deleteUser(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
 
+    // Sanitize the user ID
+    const sanitizedId = sanitizeInput(id);
+    if (!sanitizedId) {
+      res.status(400).json({ error: "Invalid user ID" });
+      return;
+    }
+
     const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOneBy({ id });
+    const user = await userRepo.findOneBy({ id: sanitizedId });
 
     if (!user) {
       res.status(404).json({ error: "User not found" });
@@ -92,7 +109,7 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
     }
 
     // Check if user can be deleted
-    const canDelete = await canUserBeDeleted(id);
+    const canDelete = await canUserBeDeleted(sanitizedId);
     if (!canDelete.success) {
       if (canDelete.requiresTransfer) {
         res.status(400).json({ 
@@ -110,12 +127,12 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
     }
 
     // Anonymize the user instead of hard deleting
-    const result = await anonymizeUser(id);
+    const result = await anonymizeUser(sanitizedId);
     
     if (result.success) {
       res.status(200).json({ 
         message: "User account anonymized successfully",
-        userId: id
+        userId: sanitizedId
       });
     } else {
       res.status(500).json({ error: result.message });
@@ -129,19 +146,26 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
 /**
  * GET /admin/users/:id/deletion-status - Check if user can be deleted (admin only)
  */
-export async function checkUserDeletionStatus(req: Request, res: Response): Promise<void> {
+export async function checkUserDeletionStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
 
+    // Sanitize the user ID
+    const sanitizedId = sanitizeInput(id);
+    if (!sanitizedId) {
+      res.status(400).json({ error: "Invalid user ID" });
+      return;
+    }
+
     const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOneBy({ id });
+    const user = await userRepo.findOneBy({ id: sanitizedId });
 
     if (!user) {
       res.status(404).json({ error: "User not found" });
       return;
     }
 
-    const result = await canUserBeDeleted(id);
+    const result = await canUserBeDeleted(sanitizedId);
     
     if (result.success) {
       res.json({ 
@@ -168,18 +192,28 @@ export async function checkUserDeletionStatus(req: Request, res: Response): Prom
 /**
  * PATCH /admin/users/:id/role - Update user role (admin only)
  */
-export async function updateUserRole(req: Request, res: Response): Promise<void> {
+export async function updateUserRole(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
-    const { role } = req.body;
+    
+    // Sanitize the user ID
+    const sanitizedId = sanitizeInput(id);
+    if (!sanitizedId) {
+      res.status(400).json({ error: "Invalid user ID" });
+      return;
+    }
 
-    if (!["clubowner", "bouncer", "user"].includes(role)) {
+    // Sanitize the request body
+    const sanitizedBody = sanitizeObject(req.body, ['role'], { maxLength: 20 });
+    const { role } = sanitizedBody;
+
+    if (!role || !["clubowner", "bouncer", "user"].includes(role)) {
       res.status(400).json({ error: "Invalid role. Allowed roles: user, clubowner, bouncer." });
       return;
     }
 
     const repo = AppDataSource.getRepository(User);
-    const user = await repo.findOneBy({ id });
+    const user = await repo.findOneBy({ id: sanitizedId });
 
     if (!user) {
       res.status(404).json({ error: "User not found" });
@@ -201,7 +235,7 @@ export async function updateUserRole(req: Request, res: Response): Promise<void>
 
     res.json({ 
       message: `User role updated to ${role}`,
-      userId: id,
+      userId: sanitizedId,
       newRole: role
     });
   } catch (error) {
