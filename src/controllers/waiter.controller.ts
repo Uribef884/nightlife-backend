@@ -40,8 +40,8 @@ export const createWaiter = async (req: AuthenticatedRequest, res: Response): Pr
       return;
     }
 
-    if (!requester || (requester.role !== "admin" && requester.role !== "clubowner")) {
-      res.status(403).json({ error: "Unauthorized" });
+    if (!requester || requester.role !== "clubowner") {
+      res.status(403).json({ error: "Only club owners can create waiters" });
       return;
     }
 
@@ -51,22 +51,12 @@ export const createWaiter = async (req: AuthenticatedRequest, res: Response): Pr
       return;
     }
 
-    let clubId: string;
-
-    if (requester.role === "admin") {
-      clubId = req.body.clubId;
-      if (!clubId) {
-        res.status(400).json({ error: "Missing clubId for waiter" });
-        return;
-      }
-    } else {
-      const club = await clubRepo.findOneBy({ ownerId: requester.id });
-      if (!club) {
-        res.status(403).json({ error: "You don't own a club" });
-        return;
-      }
-      clubId = club.id;
+    const club = await clubRepo.findOneBy({ ownerId: requester.id });
+    if (!club) {
+      res.status(403).json({ error: "You don't own a club" });
+      return;
     }
+    const clubId = club.id;
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const newWaiter = userRepo.create({
@@ -88,30 +78,19 @@ export const getWaiters = async (req: AuthenticatedRequest, res: Response): Prom
   const userRepo = AppDataSource.getRepository(User);
   const requester = req.user;
 
-  if (!requester || (requester.role !== "admin" && requester.role !== "clubowner")) {
-    res.status(403).json({ error: "Unauthorized" });
+  if (!requester || requester.role !== "clubowner") {
+    res.status(403).json({ error: "Only club owners can view waiters" });
     return;
   }
 
-  let clubId: string;
-
-  if (requester.role === "admin") {
-    clubId = req.query.clubId as string;
-    if (!clubId) {
-      res.status(400).json({ error: "Missing clubId" });
-      return;
-    }
-  } else {
-    const club = await AppDataSource.getRepository(Club).findOneBy({ ownerId: requester.id });
-    if (!club) {
-      res.status(403).json({ error: "You don't own a club" });
-      return;
-    }
-    clubId = club.id;
+  const club = await AppDataSource.getRepository(Club).findOneBy({ ownerId: requester.id });
+  if (!club) {
+    res.status(403).json({ error: "You don't own a club" });
+    return;
   }
 
   const waiters = await userRepo.find({
-    where: { role: "waiter", clubId },
+    where: { role: "waiter", clubId: club.id },
     select: ["id", "email", "createdAt"],
   });
 
@@ -123,17 +102,19 @@ export const deleteWaiter = async (req: AuthenticatedRequest, res: Response): Pr
   const userRepo = AppDataSource.getRepository(User);
   const requester = req.user;
 
+  if (!requester || requester.role !== "clubowner") {
+    res.status(403).json({ error: "Only club owners can delete waiters" });
+    return;
+  }
+
   const waiter = await userRepo.findOneBy({ id, role: "waiter" });
   if (!waiter) {
     res.status(404).json({ error: "Waiter not found" });
     return;
   }
 
-  const isAdmin = requester?.role === "admin";
-  const ownerClub = await AppDataSource.getRepository(Club).findOneBy({ ownerId: requester!.id });
-  const isOwner = requester?.role === "clubowner" && waiter.clubId === ownerClub?.id;
-
-  if (!isAdmin && !isOwner) {
+  const ownerClub = await AppDataSource.getRepository(Club).findOneBy({ ownerId: requester.id });
+  if (!ownerClub || waiter.clubId !== ownerClub.id) {
     res.status(403).json({ error: "You are not authorized to delete this waiter" });
     return;
   }

@@ -10,6 +10,8 @@ import { AuthenticatedRequest } from "../types/express";
 import { sanitizeInput, sanitizeObject } from "../utils/sanitizeInput";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { validateImageUrlWithResponse } from "../utils/validateImageUrl";
+import { S3Service } from "../services/s3Service";
+import { ImageService } from "../services/imageService";
 
 export const createMenuItem = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
@@ -77,7 +79,7 @@ export const createMenuItem = async (req: AuthenticatedRequest, res: Response): 
     }
 
     if (!hasVariantsBool && (typeof priceNum !== "number" || priceNum <= 0)) {
-      res.status(400).json({ error: "Price must be a positive number if hasVariants is false" });
+      res.status(400).json({ error: "Price must be a positive number (greater than 0) if hasVariants is false" });
       return;
     }
 
@@ -204,36 +206,53 @@ export const updateMenuItem = async (req: AuthenticatedRequest, res: Response): 
       item.imageUrl = imageUrl;
     }
 
-    if (item.hasVariants) {
-      if (price !== null) {
+    // Parse boolean values from form data for validation
+    const hasVariantsBool = item.hasVariants;
+    const priceNum = price && price !== "" ? Number(price) : undefined;
+    const maxPerPersonNum = maxPerPerson && maxPerPerson !== "" ? Number(maxPerPerson) : undefined;
+
+    // Only validate price if it's provided in the request
+    if (price !== undefined) {
+      if (hasVariantsBool && priceNum !== null && priceNum !== undefined) {
         res.status(400).json({ error: "Price must be null when hasVariants is true" });
         return;
       }
-    } else {
-      if (typeof price !== "number" || price <= 0) {
-        res.status(400).json({ error: "Price must be a positive number if hasVariants is false" });
+
+      if (!hasVariantsBool && (typeof priceNum !== "number" || priceNum <= 0)) {
+        res.status(400).json({ error: "Price must be a positive number (greater than 0) if hasVariants is false" });
         return;
       }
-      item.price = price;
     }
 
-    if (typeof maxPerPerson === "number") {
-      if (item.hasVariants) {
+    // Only validate maxPerPerson if it's provided in the request
+    if (maxPerPerson !== undefined) {
+      if (hasVariantsBool && maxPerPersonNum !== null && maxPerPersonNum !== undefined) {
         res.status(400).json({ error: "maxPerPerson must be null when hasVariants is true" });
         return;
       }
-      if (maxPerPerson <= 0) {
-        res.status(400).json({ error: "maxPerPerson must be positive" });
+
+      if (!hasVariantsBool && (typeof maxPerPersonNum !== "number" || maxPerPersonNum <= 0)) {
+        res.status(400).json({ error: "maxPerPerson must be a positive number if hasVariants is false" });
         return;
       }
-      item.maxPerPerson = maxPerPerson;
-    } else if (maxPerPerson === null || maxPerPerson === undefined) {
-      // Allow setting maxPerPerson to null/undefined for items with variants
-      if (!item.hasVariants) {
-        res.status(400).json({ error: "maxPerPerson is required for items without variants" });
-        return;
+    }
+
+    // Update price if provided and valid
+    if (price !== undefined) {
+      if (hasVariantsBool) {
+        item.price = undefined;
+      } else {
+        item.price = priceNum;
       }
-      item.maxPerPerson = undefined;
+    }
+
+    // Update maxPerPerson if provided and valid
+    if (maxPerPerson !== undefined) {
+      if (hasVariantsBool) {
+        item.maxPerPerson = undefined;
+      } else {
+        item.maxPerPerson = maxPerPersonNum;
+      }
     }
 
     if (dynamicPricingEnabled !== undefined) {
@@ -271,6 +290,12 @@ export const getAllMenuItems = async (req: AuthenticatedRequest, res: Response):
         item.variants = item.variants.filter(v => v.isActive && !v.isDeleted);
       }
       const club = item.club || (await clubRepo.findOne({ where: { id: item.clubId } }));
+      
+      // Skip items from clubs that use PDF menus
+      if (club && club.menuType === "pdf") {
+        return null;
+      }
+      
       let dynamicPrice = null;
       if (item.dynamicPricingEnabled && !item.hasVariants && club) {
         dynamicPrice = computeDynamicPrice({
@@ -302,7 +327,11 @@ export const getAllMenuItems = async (req: AuthenticatedRequest, res: Response):
         variants,
       };
     }));
-    res.json(itemsWithDynamic);
+    
+    // Filter out null items (from PDF menu clubs)
+    const filteredItems = itemsWithDynamic.filter(item => item !== null);
+    
+    res.json(filteredItems);
   } catch (err) {
     console.error("Error fetching all menu items:", err);
     res.status(500).json({ error: "Failed to load menu items" });
@@ -320,6 +349,14 @@ export const getMenuItemById = async (req: AuthenticatedRequest, res: Response):
 
     if (!item) {
       res.status(404).json({ error: "Menu item not found" });
+      return;
+    }
+
+    // Check if the item's club uses PDF menu
+    if (item.club && item.club.menuType === "pdf") {
+      res.status(400).json({ 
+        error: "This menu item belongs to a club that uses a PDF menu. Structured menu items are not available." 
+      });
       return;
     }
 
@@ -445,20 +482,33 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
       const clubRepo = AppDataSource.getRepository(Club);
       const club = await clubRepo.findOne({ where: { id: clubId } });
 
-          const items = await repo.find({
-      where: {
-        clubId,
-        isActive: true,
-        isDeleted: false,
-      },
-      relations: ["category", "variants"],
-      order: {
-        category: {
+      if (!club) {
+        res.status(404).json({ error: "Club not found" });
+        return;
+      }
+
+      // Check if club uses PDF menu
+      if (club.menuType === "pdf") {
+        res.status(400).json({ 
+          error: "This club uses a PDF menu. Structured menu items are not available." 
+        });
+        return;
+      }
+
+      const items = await repo.find({
+        where: {
+          clubId,
+          isActive: true,
+          isDeleted: false,
+        },
+        relations: ["category", "variants"],
+        order: {
+          category: {
+            name: "ASC",
+          },
           name: "ASC",
         },
-        name: "ASC",
-      },
-    });
+      });
 
       items.forEach(item => {
         if (item.variants) {
@@ -512,6 +562,19 @@ export const deleteMenuItem = async (req: AuthenticatedRequest, res: Response): 
     const repo = AppDataSource.getRepository(MenuItem);
     const clubRepo = AppDataSource.getRepository(Club);
     const club = await clubRepo.findOne({ where: { id: clubId } });
+
+    if (!club) {
+      res.status(404).json({ error: "Club not found" });
+      return;
+    }
+
+    // Check if club uses PDF menu
+    if (club.menuType === "pdf") {
+      res.status(400).json({ 
+        error: "This club uses a PDF menu. Structured menu items are not available." 
+      });
+      return;
+    }
 
     const items = await repo.find({
       where: {
@@ -613,6 +676,75 @@ export const toggleMenuItemDynamicPricing = async (req: AuthenticatedRequest, re
   } catch (err) {
     console.error("Error toggling menu item dynamic pricing:", err);
     res.status(500).json({ error: "Server error toggling dynamic pricing" });
+  }
+};
+
+// Update menu item image
+export const updateMenuItemImage = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const user = req.user!;
+    const { id } = req.params;
+    const file = req.file!; // Guaranteed to exist due to middleware validation
+
+    // Only club owners can upload menu item images
+    if (user.role !== "clubowner") {
+      res.status(403).json({ error: "Only club owners can upload menu item images" });
+      return;
+    }
+
+    // Verify menu item ownership
+    const itemRepo = AppDataSource.getRepository(MenuItem);
+    const item = await itemRepo.findOne({ where: { id } });
+
+    if (!item || item.clubId !== user.clubId) {
+      res.status(404).json({ error: 'Menu item not found or unauthorized' });
+      return;
+    }
+
+    // Store reference to old image for deletion after successful upload
+    const oldImageUrl = item.imageUrl;
+
+    // Process image
+    const processed = await ImageService.processImage(file.buffer);
+    
+    // Generate unique key with timestamp to ensure new URL
+    const timestamp = Date.now();
+    const key = S3Service.generateKey(item.clubId, 'menu-item-image', `${id}-${timestamp}`);
+    const uploadResult = await S3Service.uploadFile(
+      processed.buffer,
+      'image/jpeg',
+      key
+    );
+
+    // Update menu item
+    item.imageUrl = uploadResult.url;
+    item.imageBlurhash = processed.blurhash;
+    await itemRepo.save(item);
+
+    // Delete old image from S3 if upload and DB update were successful
+    // Only delete if the URLs are different (same key = same URL = no deletion needed)
+    if (oldImageUrl && oldImageUrl !== uploadResult.url) {
+      try {
+        // Parse the S3 URL to extract the key
+        const url = new URL(oldImageUrl);
+        const oldKey = url.pathname.substring(1); // Remove leading slash
+        
+        await S3Service.deleteFile(oldKey);
+      } catch (deleteError) {
+        console.error('⚠️ Warning: Failed to delete old menu item image from S3:', deleteError);
+        // Don't fail the request - new image is already uploaded successfully
+      }
+    }
+
+    res.json({
+      message: 'Menu item image uploaded successfully',
+      imageUrl: uploadResult.url,
+      blurhash: processed.blurhash,
+      itemId: item.id
+    });
+  } catch (error) {
+    console.error('Error uploading menu item image:', error);
+    res.status(500).json({ error: 'Failed to upload image' });
   }
 };
 

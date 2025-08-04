@@ -15,14 +15,24 @@ export const getMenuConfig = async (req: AuthenticatedRequest, res: Response): P
       return;
     }
 
-    // For non-admin users, they must have a clubId
-    if (user.role !== "admin" && !user.clubId) {
-      res.status(400).json({ error: "User is not associated with any club" });
-      return;
+    // Get clubId from URL parameters for admin routes, or user's clubId for club owners
+    let clubId: string;
+    
+    if (user.role === "admin") {
+      // For admins, use the clubId from the URL parameters
+      clubId = req.params.clubId;
+      if (!clubId) {
+        res.status(400).json({ error: "clubId parameter is required" });
+        return;
+      }
+    } else {
+      // For club owners, use their associated clubId
+      if (!user.clubId) {
+        res.status(400).json({ error: "User is not associated with any club" });
+        return;
+      }
+      clubId = user.clubId;
     }
-
-    // Use user's clubId (admins will need a different endpoint to manage multiple clubs)
-    const clubId = user.clubId!;
 
     const clubRepo = AppDataSource.getRepository(Club);
     const club = await clubRepo.findOne({ 
@@ -71,18 +81,29 @@ export const switchMenuType = async (req: AuthenticatedRequest, res: Response): 
       return;
     }
 
-    // For non-admin users, they must have a clubId
-    if (user.role !== "admin" && !user.clubId) {
-      res.status(400).json({ error: "User is not associated with any club" });
-      return;
+    // Get clubId from URL parameters for admin routes, or user's clubId for club owners
+    let clubId: string;
+    
+    if (user.role === "admin") {
+      // For admins, use the clubId from the URL parameters
+      clubId = req.params.clubId;
+      if (!clubId) {
+        res.status(400).json({ error: "clubId parameter is required" });
+        return;
+      }
+    } else {
+      // For club owners, use their associated clubId
+      if (!user.clubId) {
+        res.status(400).json({ error: "User is not associated with any club" });
+        return;
+      }
+      clubId = user.clubId;
     }
 
     if (!menuType || !["structured", "pdf", "none"].includes(menuType)) {
       res.status(400).json({ error: "Invalid menu type. Must be 'structured', 'pdf', or 'none'" });
       return;
     }
-
-    const clubId = user.clubId!;
     const clubRepo = AppDataSource.getRepository(Club);
     const club = await clubRepo.findOne({ where: { id: clubId } });
 

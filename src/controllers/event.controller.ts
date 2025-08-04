@@ -12,7 +12,10 @@ import { sanitizeInput, sanitizeObject } from "../utils/sanitizeInput";
 export const getAllEvents = async (req: Request, res: Response) => {
   try {
     const eventRepo = AppDataSource.getRepository(Event);
-    const events = await eventRepo.find({ relations: ["club"] });
+    const events = await eventRepo.find({ 
+      where: { isActive: true, isDeleted: false },
+      relations: ["club"] 
+    });
     res.status(200).json(events);
   } catch (err) {
     console.error("❌ Failed to fetch all events:", err);
@@ -28,7 +31,7 @@ export const getEventsByClubId = async (req: Request, res: Response) => {
     const ticketIncludedMenuRepo = AppDataSource.getRepository(TicketIncludedMenuItem);
     
     const events = await eventRepo.find({
-      where: { clubId },
+      where: { clubId, isActive: true, isDeleted: false },
       relations: ["club", "tickets"],
       order: { availableDate: "ASC", createdAt: "DESC" }
     });
@@ -183,8 +186,8 @@ export const createEvent = async (req: AuthenticatedRequest, res: Response): Pro
       return;
     }
 
-    if (!name || !availableDate) {
-      res.status(400).json({ error: "Missing required fields: name or availableDate" });
+    if (!name || !availableDate || !openHours) {
+      res.status(400).json({ error: "Missing required fields: name, availableDate, or openHours" });
       return;
     }
 
@@ -194,17 +197,33 @@ export const createEvent = async (req: AuthenticatedRequest, res: Response): Pro
       return;
     }
 
-    // Parse openHours if provided
+    // Parse and validate openHours (required)
     let parsedOpenHours = null;
-    if (openHours && typeof openHours === 'string') {
+    if (typeof openHours === 'string') {
       try {
         parsedOpenHours = JSON.parse(openHours);
       } catch (error) {
         res.status(400).json({ error: "Invalid openHours format. Must be valid JSON." });
         return;
       }
-    } else if (openHours && typeof openHours === 'object') {
+    } else if (typeof openHours === 'object') {
       parsedOpenHours = openHours;
+    } else {
+      res.status(400).json({ error: "openHours is required and must be provided" });
+      return;
+    }
+
+    // Validate openHours format
+    if (!parsedOpenHours.open || !parsedOpenHours.close) {
+      res.status(400).json({ error: "openHours must have both 'open' and 'close' properties" });
+      return;
+    }
+
+    // Validate time format (HH:MM)
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeRegex.test(parsedOpenHours.open) || !timeRegex.test(parsedOpenHours.close)) {
+      res.status(400).json({ error: "Time format must be HH:MM (e.g., '22:00', '02:00')" });
+      return;
     }
 
     // 🔒 Normalize date using same pattern as checkout.ts
@@ -244,7 +263,7 @@ export const createEvent = async (req: AuthenticatedRequest, res: Response): Pro
 
     // Upload image to S3
     const { S3Service } = await import("../services/s3Service");
-    const key = S3Service.generateKey(user.clubId, 'event-banner');
+    const key = S3Service.generateKey(user.clubId, 'event-banner', `${newEvent.id}-${Date.now()}`);
     const uploadResult = await S3Service.uploadFile(processed.buffer, 'image/jpeg', key);
     
     // Update event with banner URL
@@ -385,18 +404,35 @@ export const updateEvent = async (req: AuthenticatedRequest, res: Response): Pro
       return;
     }
 
-    // Parse openHours if provided
+    // Parse and validate openHours if provided
     if (openHours !== undefined) {
       let parsedOpenHours = null;
-      if (openHours && typeof openHours === 'string') {
-        try {
-          parsedOpenHours = JSON.parse(openHours);
-        } catch (error) {
-          res.status(400).json({ error: "Invalid openHours format. Must be valid JSON." });
-          return;
+      if (openHours) {
+        if (typeof openHours === 'string') {
+          try {
+            parsedOpenHours = JSON.parse(openHours);
+          } catch (error) {
+            res.status(400).json({ error: "Invalid openHours format. Must be valid JSON." });
+            return;
+          }
+        } else if (typeof openHours === 'object') {
+          parsedOpenHours = openHours;
         }
-      } else if (openHours && typeof openHours === 'object') {
-        parsedOpenHours = openHours;
+
+        // Validate openHours format
+        if (parsedOpenHours) {
+          if (!parsedOpenHours.open || !parsedOpenHours.close) {
+            res.status(400).json({ error: "openHours must have both 'open' and 'close' properties" });
+            return;
+          }
+
+          // Validate time format (HH:MM)
+          const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+          if (!timeRegex.test(parsedOpenHours.open) || !timeRegex.test(parsedOpenHours.close)) {
+            res.status(400).json({ error: "Time format must be HH:MM (e.g., '22:00', '02:00')" });
+            return;
+          }
+        }
       }
       event.openHours = parsedOpenHours;
     }
@@ -494,7 +530,12 @@ export const toggleEventVisibility = async (req: AuthenticatedRequest, res: Resp
 
     const { id } = req.params;
     const eventRepo = AppDataSource.getRepository(Event);
-    const event = await eventRepo.findOne({ where: { id } });
+    const ticketRepo = AppDataSource.getRepository(Ticket);
+    
+    const event = await eventRepo.findOne({ 
+      where: { id },
+      relations: ["tickets"]
+    });
 
     if (!event) {
       res.status(404).json({ error: "Event not found" });
@@ -506,12 +547,27 @@ export const toggleEventVisibility = async (req: AuthenticatedRequest, res: Resp
       return;
     }
 
+    // Toggle event visibility
     event.isActive = !event.isActive;
     await eventRepo.save(event);
 
-    res.json({ message: "Event visibility toggled", isActive: event.isActive });
+    // Toggle visibility for all child tickets
+    if (event.tickets && event.tickets.length > 0) {
+      for (const ticket of event.tickets) {
+        ticket.isActive = event.isActive;
+        await ticketRepo.save(ticket);
+      }
+    }
+
+    res.json({ 
+      message: "Event and all child tickets visibility toggled", 
+      isActive: event.isActive,
+      ticketsUpdated: event.tickets?.length || 0
+    });
   } catch (err) {
     console.error("❌ Failed to toggle event visibility:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 };
+
+

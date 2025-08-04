@@ -33,12 +33,33 @@ export const upload = multer({
   },
 });
 
+// Custom error handler for Multer errors
+export const handleMulterError = (error: any, req: Request, res: Response, next: NextFunction): void => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      res.status(400).json({ 
+        error: `File too large. Maximum size is ${process.env.MAX_PDF_SIZE_MB || '10'}MB.` 
+      });
+    } else if (error.code === 'LIMIT_UNEXPECTED_FILE') {
+      res.status(400).json({ 
+        error: `Unexpected field name "${error.field}". For PDF uploads use field name "pdf", for images use field name "image".` 
+      });
+    } else {
+      res.status(400).json({ 
+        error: `Upload error: ${error.message}` 
+      });
+    }
+  } else {
+    next(error);
+  }
+};
+
 // Specific validation middleware for PDF files only
 export const validatePdfUpload = (req: Request, res: Response, next: NextFunction): void => {
   // Check if file exists
   if (!req.file) {
     res.status(400).json({ 
-      error: 'No file uploaded. Please select a PDF file to upload.' 
+      error: 'No file uploaded. Please select a PDF file to upload. Make sure the field name is "pdf".' 
     });
     return;
   }
@@ -68,7 +89,7 @@ export const validateImageUpload = (req: Request, res: Response, next: NextFunct
   // Check if file exists
   if (!req.file) {
     res.status(400).json({ 
-      error: 'No file uploaded. Please select an image file to upload.' 
+      error: 'No file uploaded. Please select an image file to upload. Make sure the field name is "image".' 
     });
     return;
   }
@@ -103,7 +124,7 @@ export const validateImageUpload = (req: Request, res: Response, next: NextFunct
 export const validateFileUpload = (req: Request, res: Response, next: NextFunction): void => {
   if (!req.file) {
     res.status(400).json({ 
-      error: 'No file uploaded. Please select a file to upload.' 
+      error: 'No file uploaded. Please select a file to upload. Check that you are using the correct field name for your upload type.' 
     });
     return;
   }

@@ -28,6 +28,7 @@ import ticketIncludedMenuRoutes from "./routes/ticketIncludedMenu.routes";
 import menuConfigRoutes from "./routes/menuConfig.routes";
 import fileUploadRoutes from "./routes/fileUpload.routes";
 import adRoutes from "./routes/ads.routes";
+import adminRoutes from "./routes/admin";
 
 dotenv.config();
 
@@ -89,6 +90,9 @@ app.use("/validate/menu-from-ticket", menuFromTicketQRRoutes);
 
 // Ticket Menu Management
 app.use("/ticket-menu", ticketIncludedMenuRoutes);
+
+// Admin Routes
+app.use("/admin", adminRoutes);
 
 // DB Connection
 AppDataSource.initialize()

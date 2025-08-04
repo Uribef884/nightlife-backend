@@ -20,6 +20,9 @@ export class User {
   email!: string;
 
   @Column({ nullable: true })
+  originalEmail?: string; // Store original email for audit purposes
+
+  @Column({ nullable: true })
   password?: string;
 
   @Column({
@@ -56,4 +59,10 @@ export class User {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @Column({ default: false })
+  isDeleted!: boolean;
+
+  @Column({ type: "timestamp", nullable: true })
+  deletedAt?: Date;
 }

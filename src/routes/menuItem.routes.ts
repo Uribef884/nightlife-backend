@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   createMenuItem,
   updateMenuItem,
+  updateMenuItemImage,
   deleteMenuItem,
   getAllMenuItems,
   getMenuItemById,
@@ -25,6 +26,7 @@ router.get("/:id", getMenuItemById);
 router.get("/my/items", authMiddleware, requireClubOwnerOrAdmin, getItemsForMyClub);
 router.post("/", authMiddleware, requireClubOwnerOrAdmin, upload.single('image'), createMenuItem);
 router.patch("/:id", authMiddleware, requireClubOwnerOrAdmin, updateMenuItem);
+router.patch("/:id/image", authMiddleware, requireClubOwnerOrAdmin, upload.single('image'), updateMenuItemImage);
 router.delete("/:id", authMiddleware, requireClubOwnerOrAdmin, deleteMenuItem);
 router.patch('/:id/toggle-dynamic-pricing', authMiddleware, toggleMenuItemDynamicPricing);
 

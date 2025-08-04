@@ -566,7 +566,7 @@ export async function getTicketsByClub(req: Request, res: Response): Promise<voi
     const ticketIncludedMenuRepo = AppDataSource.getRepository(TicketIncludedMenuItem);
     
     const tickets = await repo.find({
-      where: { club: { id }, isDeleted: false },
+      where: { club: { id }, isActive: true, isDeleted: false },
       order: { priority: "ASC" },
       relations: ["club", "event"],
     });
@@ -649,22 +649,30 @@ export async function getTicketsByClub(req: Request, res: Response): Promise<voi
 export async function getTicketById(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const user = req.user;
-    if (!user) {
-      res.status(401).json({ error: "Unauthorized" });
-      return;
-    }
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const clubRepo = AppDataSource.getRepository(Club);
     const { id } = req.params;
+    
+    // Build where clause based on authentication status
+    let whereClause: any = { id, isDeleted: false };
+    
+    // If no user (public access), only show active tickets
+    if (!user) {
+      whereClause.isActive = true;
+    }
+    
     const ticket = await ticketRepo.findOne({ 
-      where: { id, isDeleted: false }, 
+      where: whereClause, 
       relations: ["club"] 
     });
+    
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
       return;
     }
-    if (user.role === "clubowner" && ticket.club.ownerId !== user.id) {
+    
+    // If user is authenticated and is a clubowner, check ownership
+    if (user && user.role === "clubowner" && ticket.club.ownerId !== user.id) {
       res.status(403).json({ error: "Forbidden: This ticket doesn't belong to your club" });
       return;
     }
@@ -844,17 +852,20 @@ export const toggleTicketDynamicPricing = async (req: Request, res: Response): P
 
     // Prevent enabling dynamic pricing for free tickets
     if ((ticket.category === TicketCategory.FREE || ticket.price === 0)) {
-      if (!ticket.dynamicPricingEnabled && req.body?.enable === true) {
+      if (!ticket.dynamicPricingEnabled) {
+        // Don't allow enabling dynamic pricing for free tickets
         res.status(400).json({ error: "Dynamic pricing cannot be enabled for free tickets. Free tickets must always have a fixed price of 0." });
         return;
+      } else {
+        // Allow disabling if currently enabled (shouldn't happen, but for safety)
+        ticket.dynamicPricingEnabled = false;
+        await repo.save(ticket);
+        res.json({ message: "Dynamic pricing has been disabled for this free ticket. Free tickets must always have a fixed price of 0.", dynamicPricingEnabled: ticket.dynamicPricingEnabled });
+        return;
       }
-      // Allow disabling if currently enabled (shouldn't happen, but for safety)
-      ticket.dynamicPricingEnabled = false;
-      await repo.save(ticket);
-      res.json({ message: "Dynamic pricing has been disabled for this free ticket. Free tickets must always have a fixed price of 0.", dynamicPricingEnabled: ticket.dynamicPricingEnabled });
-      return;
     }
 
+    // For paid tickets, allow normal toggle
     ticket.dynamicPricingEnabled = !ticket.dynamicPricingEnabled;
     await repo.save(ticket);
 

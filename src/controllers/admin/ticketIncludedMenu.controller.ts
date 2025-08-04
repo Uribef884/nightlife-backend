@@ -1,12 +1,12 @@
 import { Request, Response } from "express";
-import { AppDataSource } from "../config/data-source";
-import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
-import { Ticket } from "../entities/Ticket";
-import { MenuItem } from "../entities/MenuItem";
-import { MenuItemVariant } from "../entities/MenuItemVariant";
-import { AuthenticatedRequest } from "../types/express";
+import { AppDataSource } from "../../config/data-source";
+import { TicketIncludedMenuItem } from "../../entities/TicketIncludedMenuItem";
+import { Ticket } from "../../entities/Ticket";
+import { MenuItem } from "../../entities/MenuItem";
+import { MenuItemVariant } from "../../entities/MenuItemVariant";
+import { AuthenticatedRequest } from "../../types/express";
 
-export async function getTicketIncludedMenuItems(
+export async function getTicketIncludedMenuItemsAdmin(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
@@ -56,7 +56,7 @@ export async function getTicketIncludedMenuItems(
   }
 }
 
-export async function addTicketIncludedMenuItem(
+export async function addTicketIncludedMenuItemAdmin(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
@@ -80,20 +80,14 @@ export async function addTicketIncludedMenuItem(
       return;
     }
 
-    // Verify ticket exists and belongs to the club owner
+    // Verify ticket exists
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const ticket = await ticketRepo.findOne({
-      where: { id: ticketId, isDeleted: false },
-      relations: ["club"]
+      where: { id: ticketId, isDeleted: false }
     });
 
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
-      return;
-    }
-
-    if (ticket.club.ownerId !== req.user!.id) {
-      res.status(403).json({ error: "Access denied" });
       return;
     }
 
@@ -113,6 +107,14 @@ export async function addTicketIncludedMenuItem(
 
     if (!menuItem) {
       res.status(404).json({ error: "Menu item not found or doesn't belong to this club" });
+      return;
+    }
+
+    // ❌ Additional validation: Ensure menu item belongs to the same club as the ticket
+    if (menuItem.clubId !== ticket.clubId) {
+      res.status(400).json({ 
+        error: `Menu item "${menuItem.name}" does not belong to the same club as this ticket` 
+      });
       return;
     }
 
@@ -188,7 +190,7 @@ export async function addTicketIncludedMenuItem(
   }
 }
 
-export async function removeTicketIncludedMenuItem(
+export async function removeTicketIncludedMenuItemAdmin(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
@@ -200,20 +202,14 @@ export async function removeTicketIncludedMenuItem(
       return;
     }
 
-    // Verify ticket exists and belongs to the club owner
+    // Verify ticket exists
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const ticket = await ticketRepo.findOne({
-      where: { id: ticketId, isDeleted: false },
-      relations: ["club"]
+      where: { id: ticketId, isDeleted: false }
     });
 
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
-      return;
-    }
-
-    if (ticket.club.ownerId !== req.user!.id) {
-      res.status(403).json({ error: "Access denied" });
       return;
     }
 
@@ -242,7 +238,7 @@ export async function removeTicketIncludedMenuItem(
   }
 }
 
-export async function updateTicketIncludedMenuItem(
+export async function updateTicketIncludedMenuItemAdmin(
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> {
@@ -266,20 +262,14 @@ export async function updateTicketIncludedMenuItem(
       return;
     }
 
-    // Verify ticket exists and belongs to the club owner
+    // Verify ticket exists
     const ticketRepo = AppDataSource.getRepository(Ticket);
     const ticket = await ticketRepo.findOne({
-      where: { id: ticketId, isDeleted: false },
-      relations: ["club"]
+      where: { id: ticketId, isDeleted: false }
     });
 
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
-      return;
-    }
-
-    if (ticket.club.ownerId !== req.user!.id) {
-      res.status(403).json({ error: "Access denied" });
       return;
     }
 

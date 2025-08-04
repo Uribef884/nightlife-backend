@@ -117,15 +117,30 @@ export const createAdminAdGlobal = async (req: AuthenticatedRequest, res: Respon
 // --- CREATE CLUB AD ---
 export const createClubAd = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    if (req.user?.role !== "clubowner") {
-      res.status(403).json({ error: "Only club owners can create club ads." });
+    if (req.user?.role !== "clubowner" && req.user?.role !== "admin") {
+      res.status(403).json({ error: "Only club owners and admins can create club ads." });
       return;
     }
     const { priority, isVisible, targetType, targetId } = req.body;
-    const clubId = req.user.clubId;
-    if (!clubId) {
-      res.status(400).json({ error: "No clubId found for user." });
-      return;
+    
+    // Get clubId based on user role
+    let clubId: string;
+    
+    if (req.user?.role === "admin") {
+      // For admins, use the clubId from the URL parameters
+      const paramClubId = req.params.clubId;
+      if (!paramClubId) {
+        res.status(400).json({ error: "clubId parameter is required for admin ad creation" });
+        return;
+      }
+      clubId = paramClubId;
+    } else {
+      // For club owners, use their associated clubId
+      if (!req.user?.clubId) {
+        res.status(400).json({ error: "No clubId found for user." });
+        return;
+      }
+      clubId = req.user.clubId;
     }
     // Rate limiting: max 7 ads per club
     const adRepo = AppDataSource.getRepository(Ad);
@@ -211,8 +226,12 @@ export const updateAd = async (req: AuthenticatedRequest, res: Response): Promis
       res.status(403).json({ error: "Only admins can update admin ads." });
       return;
     }
-    if (ad.clubId && (req.user?.role !== "clubowner" || req.user.clubId !== ad.clubId)) {
+    if (ad.clubId && req.user?.role === "clubowner" && req.user.clubId !== ad.clubId) {
       res.status(403).json({ error: "Only the club owner can update this ad." });
+      return;
+    }
+    if (ad.clubId && req.user?.role !== "clubowner" && req.user?.role !== "admin") {
+      res.status(403).json({ error: "Only club owners and admins can update club ads." });
       return;
     }
     // Update fields
@@ -233,36 +252,12 @@ export const updateAd = async (req: AuthenticatedRequest, res: Response): Promis
     if (isVisible !== undefined) {
       ad.isVisible = isVisible === "true" || isVisible === true;
     }
-    // Target validation
-    if (targetType !== undefined) {
-      if (targetType && !validateTargetType(targetType)) {
-        res.status(400).json({ error: "targetType must be 'ticket' or 'event' if provided." });
-        return;
-      }
-      if (targetType && !targetId) {
-        res.status(400).json({ error: "targetId is required if targetType is provided." });
-        return;
-      }
-      if (targetType) {
-        if (targetType === "ticket") {
-          const ticket = await AppDataSource.getRepository(Ticket).findOne({ where: { id: targetId, clubId: ad.clubId ?? undefined } });
-          if (!ticket) {
-            res.status(400).json({ error: "Target ticket not found or not owned by your club." });
-            return;
-          }
-        } else if (targetType === "event") {
-          const event = await AppDataSource.getRepository(Event).findOne({ where: { id: targetId, clubId: ad.clubId ?? undefined } });
-          if (!event) {
-            res.status(400).json({ error: "Target event not found or not owned by your club." });
-            return;
-          }
-        }
-        ad.targetType = targetType;
-        ad.targetId = targetId;
-      } else {
-        ad.targetType = null;
-        ad.targetId = null;
-      }
+    // Target validation - targetType and targetId cannot be changed once created
+    if (targetType !== undefined || targetId !== undefined) {
+      res.status(400).json({ 
+        error: "targetType and targetId cannot be modified after ad creation. Please delete the ad and create a new one if you need to change the target." 
+      });
+      return;
     }
     // Image update (optional)
     if (req.file) {
@@ -297,8 +292,12 @@ export const deleteAd = async (req: AuthenticatedRequest, res: Response): Promis
       res.status(403).json({ error: "Only admins can delete admin ads." });
       return;
     }
-    if (ad.clubId && (req.user?.role !== "clubowner" || req.user.clubId !== ad.clubId)) {
+    if (ad.clubId && req.user?.role === "clubowner" && req.user.clubId !== ad.clubId) {
       res.status(403).json({ error: "Only the club owner can delete this ad." });
+      return;
+    }
+    if (ad.clubId && req.user?.role !== "clubowner" && req.user?.role !== "admin") {
+      res.status(403).json({ error: "Only club owners and admins can delete club ads." });
       return;
     }
 
@@ -407,12 +406,55 @@ export const getMyClubAds = async (req: AuthenticatedRequest, res: Response): Pr
     }
     const adRepo = AppDataSource.getRepository(Ad);
     const ads = await adRepo.find({ 
-      where: { clubId, isActive: true, isDeleted: false }, 
+      where: { clubId, isDeleted: false }, 
       order: { priority: "DESC", createdAt: "DESC" } 
     });
     res.json(ads.map(adToResponse));
   } catch (error) {
     console.error("Error fetching my club ads:", error);
     res.status(500).json({ error: "Failed to fetch my club ads." });
+  }
+};
+
+// --- GET GLOBAL ADS (ADMIN) ---
+export const getGlobalAdsAdmin = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (req.user?.role !== "admin") {
+      res.status(403).json({ error: "Only admins can view all global ads." });
+      return;
+    }
+    const adRepo = AppDataSource.getRepository(Ad);
+    const ads = await adRepo.find({ 
+      where: { clubId: IsNull() }, 
+      order: { priority: "DESC", createdAt: "DESC" } 
+    });
+    res.json(ads.map(adToResponse));
+  } catch (error) {
+    console.error("Error fetching global ads (admin):", error);
+    res.status(500).json({ error: "Failed to fetch global ads." });
+  }
+};
+
+// --- GET CLUB ADS (ADMIN) ---
+export const getClubAdsAdmin = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    if (req.user?.role !== "admin") {
+      res.status(403).json({ error: "Only admins can view all club ads." });
+      return;
+    }
+    const { clubId } = req.params;
+    if (!clubId) {
+      res.status(400).json({ error: "clubId parameter is required" });
+      return;
+    }
+    const adRepo = AppDataSource.getRepository(Ad);
+    const ads = await adRepo.find({ 
+      where: { clubId }, 
+      order: { priority: "DESC", createdAt: "DESC" } 
+    });
+    res.json(ads.map(adToResponse));
+  } catch (error) {
+    console.error("Error fetching club ads (admin):", error);
+    res.status(500).json({ error: "Failed to fetch club ads." });
   }
 }; 

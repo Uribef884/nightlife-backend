@@ -24,6 +24,12 @@ export const authMiddleware = (
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
 
+    // Check if user account is deleted from JWT token
+    if (decoded.isDeleted) {
+      res.status(401).json({ error: "Account has been deleted" });
+      return;
+    }
+
     req.user = {
       id: decoded.id,
       role: decoded.role,

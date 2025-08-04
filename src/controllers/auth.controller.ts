@@ -14,6 +14,7 @@ import { sendPasswordResetEmail } from "../services/emailService";
 import { MenuCartItem } from "../entities/MenuCartItem";
 import { OAuthService, GoogleUserInfo } from "../services/oauthService";
 import { sanitizeInput } from "../utils/sanitizeInput";
+import { anonymizeUser, canUserBeDeleted } from "../utils/anonymizeUser";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
 const RESET_SECRET = process.env.RESET_SECRET || "dev-reset-secret";
@@ -62,7 +63,7 @@ export async function register(req: Request, res: Response): Promise<void> {
     });
     await repo.save(user);
 
-    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign({ id: user.id, role: user.role, isDeleted: user.isDeleted }, JWT_SECRET, { expiresIn: "7d" });
 
     res.status(201).json({
       message: "User registered successfully",
@@ -96,6 +97,12 @@ export async function login(req: Request, res: Response): Promise<void> {
 
   if (!user) {
     res.status(401).json({ error: "Invalid credentials" });
+    return;
+  }
+
+  // Check if user account is deleted
+  if (user.isDeleted) {
+    res.status(401).json({ error: "Account has been deleted" });
     return;
   }
 
@@ -139,6 +146,7 @@ export async function login(req: Request, res: Response): Promise<void> {
       id: user.id,
       role: user.role,
       email: user.email,
+      isDeleted: user.isDeleted,
       ...(clubId ? { clubId } : {}),
     },
     JWT_SECRET,
@@ -198,25 +206,7 @@ export async function logout(req: Request, res: Response): Promise<void> {
   }
 }
 
-export async function deleteUser(req: Request, res: Response): Promise<void> {
-  try {
-    const { id } = req.params;
 
-    const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOneBy({ id });
-
-    if (!user) {
-      res.status(404).json({ error: "User not found" });
-      return;
-    }
-
-    await userRepo.remove(user);
-    res.status(200).json({ message: "User deleted successfully" });
-  } catch (error) {
-    console.error("❌ Error deleting user:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-}
 
 export async function deleteOwnUser(req: Request, res: Response): Promise<void> {
   try {
@@ -234,47 +224,44 @@ export async function deleteOwnUser(req: Request, res: Response): Promise<void> 
       return;
     }
 
-    await repo.remove(user);
-    res.json({ message: "User deleted successfully" });
+    if (user.isDeleted) {
+      res.status(400).json({ error: "User account is already deleted" });
+      return;
+    }
+
+    // Check if user can be deleted
+    const canDelete = await canUserBeDeleted(userId);
+    if (!canDelete.success) {
+      if (canDelete.requiresTransfer) {
+        res.status(400).json({ 
+          error: canDelete.message,
+          requiresTransfer: true,
+          clubsToTransfer: canDelete.clubsToTransfer?.map(club => ({
+            id: club.id,
+            name: club.name
+          }))
+        });
+      } else {
+        res.status(400).json({ error: canDelete.message });
+      }
+      return;
+    }
+
+    // Anonymize the user instead of hard deleting
+    const result = await anonymizeUser(userId);
+    
+    if (result.success) {
+      res.json({ message: "Your account has been anonymized successfully" });
+    } else {
+      res.status(500).json({ error: result.message });
+    }
   } catch (error) {
     console.error("❌ Error deleting user:", error);
     res.status(500).json({ error: "Internal server error" });
   }
-
 }
 
-export async function updateUserRole(req: Request, res: Response): Promise<void> {
-  try {
-    const { id } = req.params;
-    const { role } = req.body;
 
-    if (!["clubowner", "bouncer", "user"].includes(role)) {
-      res.status(400).json({ error: "Invalid role. Allowed roles: user, clubowner, bouncer." });
-      return;
-    }
-
-    const repo = AppDataSource.getRepository(User);
-    const user = await repo.findOneBy({ id });
-
-    if (!user) {
-      res.status(404).json({ error: "User not found" });
-      return;
-    }
-
-    if (user.role === "admin") {
-      res.status(403).json({ error: "Cannot change role of an admin via API" });
-      return;
-    }
-
-    user.role = role;
-    await repo.save(user);
-
-    res.json({ message: `User role updated to ${role}` });
-  } catch (error) {
-    console.error("❌ Error updating user role:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-}
 
 export async function forgotPassword(req: Request, res: Response): Promise<void> {
   const result = forgotPasswordSchema.safeParse(req.body);
@@ -333,6 +320,12 @@ export const getCurrentUser = async (
 
   if (!user) {
     res.status(401).json({ message: "Unauthorized" });
+    return;
+  }
+
+  // Check if user account is deleted
+  if (user.isDeleted) {
+    res.status(401).json({ error: "Account has been deleted" });
     return;
   }
 
@@ -431,6 +424,12 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
     let user = await userRepo.findOneBy({ email: googleUser.email });
 
     if (user) {
+      // Check if user account is deleted
+      if (user.isDeleted) {
+        res.status(401).json({ error: "Account has been deleted" });
+        return;
+      }
+      
       // Existing user - update OAuth info if not already set
       if (!user.isOAuthUser) {
         user.googleId = googleUser.googleId;
@@ -475,6 +474,7 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
         id: user.id,
         role: user.role,
         email: user.email,
+        isDeleted: user.isDeleted,
         ...(clubId ? { clubId } : {}),
       },
       JWT_SECRET,
@@ -540,6 +540,12 @@ export async function googleTokenAuth(req: Request, res: Response): Promise<void
     let user = await userRepo.findOneBy({ email: googleUser.email });
 
     if (user) {
+      // Check if user account is deleted
+      if (user.isDeleted) {
+        res.status(401).json({ error: "Account has been deleted" });
+        return;
+      }
+      
       // Existing user - update OAuth info if not already set
       if (!user.isOAuthUser) {
         user.googleId = googleUser.googleId;
@@ -584,6 +590,7 @@ export async function googleTokenAuth(req: Request, res: Response): Promise<void
         id: user.id,
         role: user.role,
         email: user.email,
+        isDeleted: user.isDeleted,
         ...(clubId ? { clubId } : {}),
       },
       JWT_SECRET,
@@ -624,5 +631,37 @@ export async function googleTokenAuth(req: Request, res: Response): Promise<void
   } catch (error) {
     console.error("❌ Error in Google token authentication:", error);
     res.status(500).json({ error: "Failed to authenticate with Google" });
+  }
+}
+
+export async function checkUserDeletionStatus(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const result = await canUserBeDeleted(userId);
+    
+    if (result.success) {
+      res.json({ 
+        canDelete: true, 
+        message: result.message 
+      });
+    } else {
+      res.json({ 
+        canDelete: false, 
+        message: result.message,
+        requiresTransfer: result.requiresTransfer,
+        clubsToTransfer: result.clubsToTransfer?.map(club => ({
+          id: club.id,
+          name: club.name
+        }))
+      });
+    }
+  } catch (error) {
+    console.error("❌ Error checking user deletion status:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 }

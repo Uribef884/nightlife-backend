@@ -2,16 +2,15 @@ import { Router } from "express";
 import {
   register,
   login,
-  deleteUser,
   deleteOwnUser,
-  updateUserRole,
   logout,
   forgotPassword,
   resetPassword,
   getCurrentUser,
   googleAuth,
   googleCallback,
-  googleTokenAuth
+  googleTokenAuth,
+  checkUserDeletionStatus
 } from "../controllers/auth.controller";
 import { isAdmin } from "../middlewares/isAdmin";
 import { requireAuth } from "../middlewares/requireAuth";
@@ -38,9 +37,6 @@ router.post("/google/token", rateLimiter, googleTokenAuth);
 router.post("/logout", requireAuth, logout);
 router.delete("/me", requireAuth, deleteOwnUser);
 router.get("/me", requireAuth, getCurrentUser); // New route to test something in mock frontend
-
-// Admin-only routes
-router.delete("/:id", requireAuth, isAdmin, deleteUser);
-router.patch("/:id/role", requireAuth, isAdmin, updateUserRole);
+router.get("/me/deletion-status", requireAuth, checkUserDeletionStatus);
 
 export default router;

@@ -24,19 +24,7 @@ function formatTransaction(tx: MenuPurchaseTransaction, role: Role) {
     })),
   };
 
-  if (role === "admin") {
-    return {
-      ...base,
-      totalPaid: tx.totalPaid,
-      clubReceives: tx.clubReceives,
-      platformReceives: tx.platformReceives,
-      gatewayFee: tx.gatewayFee,
-      gatewayIVA: tx.gatewayIVA,
-      retentionICA: tx.retentionICA,
-      retentionIVA: tx.retentionIVA,
-      retentionFuente: tx.retentionFuente,
-    };
-  }
+
 
   if (role === "clubowner") {
     return {
@@ -66,9 +54,7 @@ async function findMenuTransactions(where: any, role: Role, query: any): Promise
     filters.user = { id: query.userId };
   }
 
-  if (role === "admin" && query.clubId) {
-    filters.clubId = query.clubId;
-  }
+
 
   if (query.orderId) {
     filters.id = query.orderId;
@@ -136,24 +122,4 @@ export const getClubMenuPurchaseById = async (req: AuthenticatedRequest, res: Re
   res.json(formatTransaction(tx, "clubowner"));
 };
 
-// 🛡 Admin
-export const getAllMenuPurchasesAdmin = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const txs = await findMenuTransactions({}, "admin", req.query);
-  res.json(txs.map((tx) => formatTransaction(tx, "admin")));
-};
 
-export const getMenuPurchaseByIdAdmin = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const id = req.params.id;
-  const txRepo = AppDataSource.getRepository(MenuPurchaseTransaction);
-
-  const tx = await txRepo.findOne({
-    where: { id },
-    relations: ["purchases", "purchases.menuItem", "purchases.variant"],
-  });
-
-  if (!tx) {
-    res.status(404).json({ error: "Not found" });
-    return;
-  } 
-  res.json(formatTransaction(tx, "admin"));
-};

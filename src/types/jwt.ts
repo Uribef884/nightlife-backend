@@ -3,4 +3,5 @@ export type JwtPayload = {
   role: "admin" | "user" | "clubowner" | "bouncer" | "waiter";
   email: string;
   clubId?: string;
+  isDeleted?: boolean;
 };

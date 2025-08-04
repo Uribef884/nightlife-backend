@@ -14,8 +14,6 @@ import { isAdmin } from '../middlewares/isAdmin';
 
 const router = Router();
 
-// POST /ads/global (admin, multipart/form-data)
-router.post('/global', authMiddleware, isAdmin, upload.single('image'), createAdminAdGlobal);
 
 // POST /ads/club (club owner, multipart/form-data)
 router.post('/club', authMiddleware, upload.single('image'), createClubAd);

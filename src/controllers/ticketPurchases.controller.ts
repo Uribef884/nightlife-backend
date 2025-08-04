@@ -63,18 +63,7 @@ async function formatTransactionWithMenu(tx: PurchaseTransaction, role: Role) {
     purchases,
   };
 
-  if (role === "admin") {
-    return {
-      ...base,
-      clubReceives: tx.clubReceives,
-      platformReceives: tx.platformReceives,
-      gatewayFee: tx.gatewayFee,
-      gatewayIVA: tx.gatewayIVA,
-      retentionICA: tx.retentionICA,
-      retentionIVA: tx.retentionIVA,
-      retentionFuente: tx.retentionFuente,
-    };
-  }
+
   if (role === "clubowner") {
     return {
       ...base,
@@ -102,9 +91,7 @@ async function findTransactions(where: any, role: Role, query: any): Promise<Pur
     filters.user = { id: query.userId };
   }
 
-  if (role === "admin" && query.clubId) {
-    filters.clubId = query.clubId;
-  }
+
 
   if (query.orderId) {
     filters.id = query.orderId;
@@ -185,8 +172,8 @@ export const validateTicketQR = async (req: AuthenticatedRequest, res: Response)
   const id = req.params.id;
   const user = req.user!;
 
-  // 🛡 Only bouncers or clubowners (not admin, not outsiders)
-  if (user.role === "admin" || !user.clubId) {
+  // 🛡 Only bouncers or clubowners (not outsiders)
+  if (!user.clubId) {
     res.status(403).json({ error: "Forbidden: You do not have access to validate this QR" });
     return;
   }
@@ -237,23 +224,4 @@ export const validateTicketQR = async (req: AuthenticatedRequest, res: Response)
   });
 };
 
-// 🛡 Admin
-export const getAllPurchasesAdmin = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const txs = await findTransactions({}, "admin", req.query);
-  const formatted = await Promise.all(txs.map((tx) => formatTransactionWithMenu(tx, "admin")));
-  res.json(formatted);
-};
 
-export const getPurchaseByIdAdmin = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const id = req.params.id;
-  const txRepo = AppDataSource.getRepository(PurchaseTransaction);
-  const tx = await txRepo.findOne({
-    where: { id },
-    relations: ["purchases", "purchases.ticket"],
-  });
-  if (!tx) {
-    res.status(404).json({ error: "Not found" });
-    return;
-  }
-  res.json(await formatTransactionWithMenu(tx, "admin"));
-};

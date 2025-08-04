@@ -15,15 +15,28 @@ export const getVariantsByMenuItemId = async (req: Request, res: Response): Prom
     const variantRepo = AppDataSource.getRepository(MenuItemVariant);
     const itemRepo = AppDataSource.getRepository(MenuItem);
     const clubRepo = AppDataSource.getRepository(Club);
+    
+    const menuItem = await itemRepo.findOne({ where: { id: menuItemId }, relations: ["club"] });
+    
+    if (!menuItem) {
+      res.status(404).json({ error: "Menu item not found" });
+      return;
+    }
+
+    let club = menuItem.club || (await clubRepo.findOne({ where: { id: menuItem.clubId } }));
+    
+    // Check if the menu item's club uses PDF menu
+    if (club && club.menuType === "pdf") {
+      res.status(400).json({ 
+        error: "This menu item belongs to a club that uses a PDF menu. Structured menu variants are not available." 
+      });
+      return;
+    }
+    
     const variants = await variantRepo.find({
       where: { menuItemId, isActive: true, isDeleted: false },
       order: { name: "ASC" },
     });
-    const menuItem = await itemRepo.findOne({ where: { id: menuItemId }, relations: ["club"] });
-    let club = null;
-    if (menuItem) {
-      club = menuItem.club || (await clubRepo.findOne({ where: { id: menuItem.clubId } }));
-    }
     const variantsWithDynamic = variants.map(variant => {
       let dynamicPrice = variant.price;
       if (variant.dynamicPricingEnabled && club) {

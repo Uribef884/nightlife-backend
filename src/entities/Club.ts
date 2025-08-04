@@ -66,11 +66,11 @@ export class Club {
   @Column({ default: 999 })
   priority!: number;
 
-  @Column()
-  profileImageUrl!: string;
+  @Column({ nullable: true })
+  profileImageUrl?: string;
 
-  @Column()
-  profileImageBlurhash!: string;
+  @Column({ nullable: true })
+  profileImageBlurhash?: string;
 
   @Column({ 
     type: "enum", 

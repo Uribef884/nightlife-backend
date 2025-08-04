@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "../config/data-source";
 import { MenuCategory } from "../entities/MenuCategory";
 import { MenuItem } from "../entities/MenuItem";
+import { Club } from "../entities/Club";
 import { computeDynamicPrice } from "../utils/dynamicPricing";
 import { sanitizeInput, sanitizeObject } from "../utils/sanitizeInput";
 import { AuthenticatedRequest } from "../types/express";
@@ -10,9 +11,28 @@ import { MenuPurchase } from "../entities/MenuPurchase";
 
 export const getAllMenuCategories = async (req: Request, res: Response) => {
   try {
+    const { clubId } = req.params;
+    
+    // Check if club exists and its menu type
+    const clubRepo = AppDataSource.getRepository(Club);
+    const club = await clubRepo.findOne({ where: { id: clubId } });
+    
+    if (!club) {
+      res.status(404).json({ error: "Club not found" });
+      return;
+    }
+
+    // Check if club uses PDF menu
+    if (club.menuType === "pdf") {
+      res.status(400).json({ 
+        error: "This club uses a PDF menu. Structured menu categories are not available." 
+      });
+      return;
+    }
+
     const repo = AppDataSource.getRepository(MenuCategory);
     const categories = await repo.find({
-      where: { isActive: true, isDeleted: false },
+      where: { clubId, isActive: true, isDeleted: false },
       relations: ["items", "items.variants", "items.club"]
     });
 
