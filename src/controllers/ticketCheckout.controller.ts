@@ -168,6 +168,13 @@ export const processSuccessfulCheckout = async ({
           const eventDate = new Date(ticket.availableDate);
           dynamicPrice = computeDynamicEventPrice(basePrice, eventDate);
           
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            return res.status(400).json({ 
+              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+            });
+          }
+          
           // Determine reason using the new function
           dynamicPricingReason = getEventTicketDynamicPricingReason(eventDate);
         } else {
@@ -184,6 +191,32 @@ export const processSuccessfulCheckout = async ({
             clubOpenDays: ticket.club.openDays,
             openHours: ticket.club.openHours,
           });
+        }
+      } else if (ticket.category === "event") {
+        // Grace period check for event tickets when dynamic pricing is disabled
+        if (ticket.event) {
+          const gracePeriodCheck = computeDynamicEventPrice(Number(ticket.price), new Date(ticket.event.availableDate), ticket.event.openHours);
+          if (gracePeriodCheck === -1) {
+            return res.status(400).json({ 
+              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+            });
+          } else if (gracePeriodCheck > basePrice) {
+            // If grace period price is higher than base price, use grace period price
+            dynamicPrice = gracePeriodCheck;
+            dynamicPricingReason = "event_grace_period";
+          }
+        } else if (ticket.availableDate) {
+          const eventDate = new Date(ticket.availableDate);
+          const gracePeriodCheck = computeDynamicEventPrice(basePrice, eventDate);
+          if (gracePeriodCheck === -1) {
+            return res.status(400).json({ 
+              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+            });
+          } else if (gracePeriodCheck > basePrice) {
+            // If grace period price is higher than base price, use grace period price
+            dynamicPrice = gracePeriodCheck;
+            dynamicPricingReason = "event_grace_period";
+          }
         }
       }
       
@@ -307,6 +340,32 @@ export const processSuccessfulCheckout = async ({
             clubOpenDays: ticket.club.openDays,
             openHours: ticket.club.openHours,
           });
+        }
+      } else if (ticket.category === "event") {
+        // Grace period check for event tickets when dynamic pricing is disabled
+        if (ticket.event) {
+          const gracePeriodCheck = computeDynamicEventPrice(Number(ticket.price), new Date(ticket.event.availableDate), ticket.event.openHours);
+          if (gracePeriodCheck === -1) {
+            return res.status(400).json({ 
+              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+            });
+          } else if (gracePeriodCheck > basePrice) {
+            // If grace period price is higher than base price, use grace period price
+            dynamicPrice = gracePeriodCheck;
+            dynamicPricingReason = "event_grace_period";
+          }
+        } else if (ticket.availableDate) {
+          const eventDate = new Date(ticket.availableDate);
+          const gracePeriodCheck = computeDynamicEventPrice(basePrice, eventDate);
+          if (gracePeriodCheck === -1) {
+            return res.status(400).json({ 
+              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+            });
+          } else if (gracePeriodCheck > basePrice) {
+            // If grace period price is higher than base price, use grace period price
+            dynamicPrice = gracePeriodCheck;
+            dynamicPricingReason = "event_grace_period";
+          }
         }
       }
       

@@ -77,6 +77,8 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
   }
 
   let total = 0;
+  let totalWithPlatformFees = 0;
+  
   for (const item of cartItems) {
     const ticket = item.ticket;
     const basePrice = Number(ticket.price);
@@ -84,27 +86,27 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
     // Compute dynamic price based on ticket type and settings
     let dynamicPrice = basePrice;
     
-          if (ticket.dynamicPricingEnabled) {
-        if (ticket.category === "event" && ticket.event) {
-          // Event ticket - use event's date and openHours for dynamic pricing
-          dynamicPrice = computeDynamicEventPrice(Number(ticket.price), new Date(ticket.event.availableDate), ticket.event.openHours);
-          
-          // Check if event has passed grace period
-          if (dynamicPrice === -1) {
-            return res.status(400).json({ 
-              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
-            });
-          }
-              } else if (ticket.category === "event" && ticket.availableDate) {
-          // Fallback: Event ticket without event relation - use ticket's availableDate
-          dynamicPrice = computeDynamicEventPrice(basePrice, new Date(ticket.availableDate));
-          
-          // Check if event has passed grace period
-          if (dynamicPrice === -1) {
-            return res.status(400).json({ 
-              error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
-            });
-          }
+    if (ticket.dynamicPricingEnabled) {
+      if (ticket.category === "event" && ticket.event) {
+        // Event ticket - use event's date and openHours for dynamic pricing
+        dynamicPrice = computeDynamicEventPrice(Number(ticket.price), new Date(ticket.event.availableDate), ticket.event.openHours);
+        
+        // Check if event has passed grace period
+        if (dynamicPrice === -1) {
+          return res.status(400).json({ 
+            error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+          });
+        }
+      } else if (ticket.category === "event" && ticket.availableDate) {
+        // Fallback: Event ticket without event relation - use ticket's availableDate
+        dynamicPrice = computeDynamicEventPrice(basePrice, new Date(ticket.availableDate));
+        
+        // Check if event has passed grace period
+        if (dynamicPrice === -1) {
+          return res.status(400).json({ 
+            error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+          });
+        }
       } else {
         // General ticket - use time-based dynamic pricing
         dynamicPrice = computeDynamicPrice({
@@ -113,14 +115,44 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
           openHours: Array.isArray(ticket.club.openHours) && ticket.club.openHours.length > 0 ? ticket.club.openHours[0].open + '-' + ticket.club.openHours[0].close : "",
         });
       }
+    } else if (ticket.category === "event") {
+      // Grace period check for event tickets when dynamic pricing is disabled
+      if (ticket.event) {
+        const gracePeriodCheck = computeDynamicEventPrice(Number(ticket.price), new Date(ticket.event.availableDate), ticket.event.openHours);
+        if (gracePeriodCheck === -1) {
+          return res.status(400).json({ 
+            error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+          });
+        } else if (gracePeriodCheck > basePrice) {
+          // If grace period price is higher than base price, use grace period price
+          dynamicPrice = gracePeriodCheck;
+        }
+      } else if (ticket.availableDate) {
+        const eventDate = new Date(ticket.availableDate);
+        const gracePeriodCheck = computeDynamicEventPrice(basePrice, eventDate);
+        if (gracePeriodCheck === -1) {
+          return res.status(400).json({ 
+            error: `Event "${ticket.name}" has already started and is no longer available for purchase.` 
+          });
+        } else if (gracePeriodCheck > basePrice) {
+          // If grace period price is higher than base price, use grace period price
+          dynamicPrice = gracePeriodCheck;
+        }
+      }
     }
     
-    // Calculate fees based on the dynamic price
+    // Calculate platform fees per ticket
     const platformFee = calculatePlatformFee(dynamicPrice, getTicketCommissionRate(ticket.category === "event"));
-    const { totalGatewayFee, iva } = calculateGatewayFees(dynamicPrice);
-    const finalPerUnit = dynamicPrice + platformFee + totalGatewayFee + iva;
-    total += finalPerUnit * item.quantity;
+    const itemTotalWithPlatformFee = dynamicPrice + platformFee;
+    
+    // Add to totals
+    total += dynamicPrice * item.quantity;
+    totalWithPlatformFees += itemTotalWithPlatformFee * item.quantity;
   }
+
+  // Calculate gateway fees on the total amount (matching checkout logic)
+  const { totalGatewayFee, iva } = calculateGatewayFees(totalWithPlatformFees);
+  const finalTotal = totalWithPlatformFees + totalGatewayFee + iva;
 
   const reference = issueMockTransaction();
   console.log(`[INITIATE] Mock reference ${reference} | User: ${userId ?? sessionId} | Email: ${email}`);
@@ -129,7 +161,7 @@ export const initiateMockCheckout = async (req: Request, res: Response) => {
   const response = {
     success: true,
     transactionId: reference,
-    total: total,
+    total: finalTotal,
     message: "Ticket checkout initiated successfully"
   };
   

@@ -10,6 +10,7 @@ import { MenuItemVariant } from "../../entities/MenuItemVariant";
 import { validateTicketInput } from "../../utils/ticketValidators";
 import { sanitizeInput, sanitizeObject } from "../../utils/sanitizeInput";
 import { TicketPurchase } from "../../entities/TicketPurchase";
+import { computeDynamicPrice, computeDynamicEventPrice } from "../../utils/dynamicPricing";
 
 // Admin function to get tickets by club ID
 export const getTicketsByClubAdmin = async (req: Request, res: Response): Promise<void> => {
@@ -28,6 +29,59 @@ export const getTicketsByClubAdmin = async (req: Request, res: Response): Promis
     const formatted = await Promise.all(tickets.map(async (t) => {
       const club = t.club || (await clubRepo.findOne({ where: { id: t.clubId } }));
       let dynamicPrice = t.price;
+      
+      if (t.dynamicPricingEnabled && club) {
+        if (t.category === "event" && t.event) {
+          // Event ticket - use event's date and openHours for dynamic pricing
+          dynamicPrice = computeDynamicEventPrice(Number(t.price), new Date(t.event.availableDate), t.event.openHours);
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            // For ticket display, we'll show the ticket as unavailable instead of blocking
+            dynamicPrice = 0; // Set to 0 to indicate unavailable
+          }
+        } else if (t.category === "event" && t.availableDate) {
+          // Fallback: Event ticket without event relation - use ticket's availableDate
+          dynamicPrice = computeDynamicEventPrice(Number(t.price), new Date(t.availableDate), undefined);
+          
+          // Check if event has passed grace period
+          if (dynamicPrice === -1) {
+            // For ticket display, we'll show the ticket as unavailable instead of blocking
+            dynamicPrice = 0; // Set to 0 to indicate unavailable
+          }
+        } else {
+          // General ticket - use time-based dynamic pricing
+          dynamicPrice = computeDynamicPrice({
+            basePrice: Number(t.price),
+            clubOpenDays: club.openDays,
+            openHours: club.openHours,
+            availableDate: t.availableDate,
+            useDateBasedLogic: false,
+          });
+        }
+      } else if (t.category === "event") {
+        // Grace period check for event tickets when dynamic pricing is disabled
+        if (t.event) {
+          const gracePeriodCheck = computeDynamicEventPrice(Number(t.price), new Date(t.event.availableDate), t.event.openHours);
+          if (gracePeriodCheck === -1) {
+            // For ticket display, we'll show the ticket as unavailable instead of blocking
+            dynamicPrice = 0; // Set to 0 to indicate unavailable
+          } else if (gracePeriodCheck > Number(t.price)) {
+            // If grace period price is higher than base price, use grace period price
+            dynamicPrice = gracePeriodCheck;
+          }
+        } else if (t.availableDate) {
+          const eventDate = new Date(t.availableDate);
+          const gracePeriodCheck = computeDynamicEventPrice(Number(t.price), eventDate);
+          if (gracePeriodCheck === -1) {
+            // For ticket display, we'll show the ticket as unavailable instead of blocking
+            dynamicPrice = 0; // Set to 0 to indicate unavailable
+          } else if (gracePeriodCheck > Number(t.price)) {
+            // If grace period price is higher than base price, use grace period price
+            dynamicPrice = gracePeriodCheck;
+          }
+        }
+      }
       
       // Fetch included menu items if this ticket includes them
       let includedMenuItems: Array<{
@@ -62,7 +116,47 @@ export const getTicketsByClubAdmin = async (req: Request, res: Response): Promis
         includedMenuItems,
       };
     }));
-    res.json(formatted);
+    
+    // 🔒 Filter out free tickets when events exist for the same date
+    const filteredTickets = await Promise.all(formatted.map(async (ticket) => {
+      if (ticket.category === "free" && ticket.availableDate) {
+        // Check if an event exists for this date
+        const eventRepo = AppDataSource.getRepository(Event);
+        const existingEvent = await eventRepo.findOne({
+          where: { 
+            clubId: ticket.clubId, 
+            availableDate: ticket.availableDate,
+            isActive: true,
+            isDeleted: false
+          }
+        });
+        
+        // Hide free ticket if event exists for same date
+        if (existingEvent) {
+          return null;
+        }
+      }
+      return ticket;
+    }));
+    
+    // Remove null entries (hidden tickets)
+    const visibleTickets = filteredTickets.filter(ticket => ticket !== null);
+    
+    // Count hidden free tickets for admins
+    let hiddenFreeTicketsCount = 0;
+    let hiddenFreeTicketsMessage = null;
+    
+    hiddenFreeTicketsCount = formatted.length - visibleTickets.length;
+    if (hiddenFreeTicketsCount > 0) {
+      hiddenFreeTicketsMessage = `${hiddenFreeTicketsCount} free ticket(s) hidden because events exist for the same date(s).`;
+    }
+    
+    const response: any = { tickets: visibleTickets };
+    if (hiddenFreeTicketsMessage) {
+      response.message = hiddenFreeTicketsMessage;
+    }
+    
+    res.json(response);
   } catch (error) {
     console.error("❌ Error fetching tickets:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -184,6 +278,27 @@ export const createTicketAdmin = async (req: Request, res: Response): Promise<vo
          return;
        }
        dynamicPricing = false;
+       
+       // 🔒 Check if event exists for this date when creating free tickets
+       if (availableDate && parsedDate) {
+         const eventRepo = queryRunner.manager.getRepository(Event);
+         const existingEvent = await eventRepo.findOne({
+           where: { 
+             clubId: club.id, 
+             availableDate: parsedDate,
+             isActive: true,
+             isDeleted: false
+           }
+         });
+
+         if (existingEvent) {
+           res.status(400).json({ 
+             error: `Cannot create free ticket for ${availableDate} because an event already exists for that date.` 
+           });
+           await queryRunner.rollbackTransaction();
+           return;
+         }
+       }
      } else {
        dynamicPricing = !!dynamicPricingEnabled;
      }

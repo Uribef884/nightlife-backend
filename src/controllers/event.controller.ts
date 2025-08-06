@@ -7,13 +7,21 @@ import { TicketIncludedMenuItem } from "../entities/TicketIncludedMenuItem";
 import { computeDynamicPrice, computeDynamicEventPrice, getEventTicketDynamicPricingReason } from "../utils/dynamicPricing";
 import { validateImageUrlWithResponse } from "../utils/validateImageUrl";
 import { sanitizeInput, sanitizeObject } from "../utils/sanitizeInput";
+import { MoreThanOrEqual } from "typeorm";
+
+// Utility function to get today's date in a timezone-safe way
+const getTodayDate = (): Date => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
 
 // GET /events — public
 export const getAllEvents = async (req: Request, res: Response) => {
   try {
     const eventRepo = AppDataSource.getRepository(Event);
     const events = await eventRepo.find({ 
-      where: { isActive: true, isDeleted: false },
+      where: { isActive: true, isDeleted: false, availableDate: MoreThanOrEqual(getTodayDate()) },
       relations: ["club"] 
     });
     res.status(200).json(events);
@@ -31,7 +39,7 @@ export const getEventsByClubId = async (req: Request, res: Response) => {
     const ticketIncludedMenuRepo = AppDataSource.getRepository(TicketIncludedMenuItem);
     
     const events = await eventRepo.find({
-      where: { clubId, isActive: true, isDeleted: false },
+      where: { clubId, isActive: true, isDeleted: false, availableDate: MoreThanOrEqual(getTodayDate()) },
       relations: ["club", "tickets"],
       order: { availableDate: "ASC", createdAt: "DESC" }
     });
@@ -41,7 +49,6 @@ export const getEventsByClubId = async (req: Request, res: Response) => {
       if (event.tickets && event.tickets.length > 0) {
         const ticketsWithDynamic = await Promise.all(event.tickets.map(async ticket => {
           let dynamicPrice = ticket.price;
-          
           if (ticket.dynamicPricingEnabled && event.club) {
             // For events, we want to use the event's date and open hours
             // The event date + open hours becomes our "open time" reference
@@ -79,6 +86,27 @@ export const getEventsByClubId = async (req: Request, res: Response) => {
               if (dynamicPrice === -1) {
                 // For event display, we'll show the ticket as unavailable instead of blocking
                 dynamicPrice = 0; // Set to 0 to indicate unavailable
+              }
+            }
+          } else if (ticket.category === "event") {
+            // Grace period check for event tickets when dynamic pricing is disabled
+            if (event.openHours && event.openHours.open && event.openHours.close) {
+              const gracePeriodCheck = computeDynamicEventPrice(Number(ticket.price), new Date(event.availableDate), event.openHours);
+              if (gracePeriodCheck === -1) {
+                // For event display, we'll show the ticket as unavailable instead of blocking
+                dynamicPrice = 0; // Set to 0 to indicate unavailable
+              } else if (gracePeriodCheck > Number(ticket.price)) {
+                // If grace period price is higher than base price, use grace period price
+                dynamicPrice = gracePeriodCheck;
+              }
+            } else {
+              const gracePeriodCheck = computeDynamicEventPrice(Number(ticket.price), new Date(event.availableDate), event.openHours);
+              if (gracePeriodCheck === -1) {
+                // For event display, we'll show the ticket as unavailable instead of blocking
+                dynamicPrice = 0; // Set to 0 to indicate unavailable
+              } else if (gracePeriodCheck > Number(ticket.price)) {
+                // If grace period price is higher than base price, use grace period price
+                dynamicPrice = gracePeriodCheck;
               }
             }
           }
@@ -249,6 +277,24 @@ export const createEvent = async (req: AuthenticatedRequest, res: Response): Pro
     const processed = await (await import("../services/imageService")).ImageService.processImage(req.file.buffer);
 
     const eventRepo = AppDataSource.getRepository(Event);
+    
+    // 🔒 Check if event already exists for this date and club
+    const existingEvent = await eventRepo.findOne({
+      where: { 
+        clubId: user.clubId, 
+        availableDate: normalizedDate,
+        isActive: true,
+        isDeleted: false
+      }
+    });
+
+    if (existingEvent) {
+      res.status(400).json({ 
+        error: `An event already exists for ${normalizedDate.toISOString().split('T')[0]}. Only one event per date is allowed.` 
+      });
+      return;
+    }
+
     const newEvent = eventRepo.create({
       name: name.trim(),
       description: description?.trim() || null,

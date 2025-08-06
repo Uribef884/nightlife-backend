@@ -753,9 +753,12 @@ document.addEventListener("DOMContentLoaded", () => {
         const ticketDynamicPrice = parseFloat(button.dataset.ticketDynamicPrice);
         const ticketCategory = button.dataset.ticketCategory;
         const eventDate = button.dataset.eventDate;
+        const availableDate = button.dataset.availableDate;
         
-        // For event tickets, use the event's available date. For normal tickets, show date picker
-        if (ticketCategory === 'event') {
+        // For free tickets, use their availableDate. For event tickets, use the event's available date. For normal tickets, show date picker
+        if (ticketCategory === 'free' && availableDate) {
+          addTicketToCart(ticketId, ticketName, ticketPrice, ticketDynamicPrice, availableDate);
+        } else if (ticketCategory === 'event') {
           addTicketToCart(ticketId, ticketName, ticketPrice, ticketDynamicPrice, eventDate);
         } else {
           showDatePickerForTicket(ticketId, ticketName, ticketPrice, ticketDynamicPrice);
@@ -974,8 +977,8 @@ document.addEventListener("DOMContentLoaded", () => {
       // Load tickets
       const ticketsRes = await fetch(`/tickets/club/${clubId}`);
       if (ticketsRes.ok) {
-        const tickets = await ticketsRes.json();
-        renderTickets(tickets);
+        const ticketsData = await ticketsRes.json();
+        renderTickets(ticketsData.tickets || ticketsData);
       } else {
         ticketsList.innerHTML = '<div class="no-items">Failed to load tickets</div>';
       }
@@ -1034,6 +1037,18 @@ document.addEventListener("DOMContentLoaded", () => {
       const soldOut = ticket.soldOut ? 'disabled' : '';
       const soldOutText = ticket.soldOut ? ' (Sold Out)' : '';
       
+      // Show available date for free tickets
+      let dateInfo = '';
+      if (ticket.category === 'free' && ticket.availableDate) {
+        const date = new Date(ticket.availableDate);
+        const formattedDate = date.toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        dateInfo = `<div style="color: #28a745; font-size: 0.8rem; margin-top: 4px;">📅 Available Date: ${formattedDate}</div>`;
+      }
+      
       let includedItemsHtml = '';
       if (ticket.includesMenuItem && ticket.includedMenuItems && ticket.includedMenuItems.length > 0) {
         includedItemsHtml = `
@@ -1061,8 +1076,9 @@ document.addEventListener("DOMContentLoaded", () => {
             Category: ${ticket.category} | Max per person: ${ticket.maxPerPerson}
             ${ticket.quantity !== null ? ` | Available: ${ticket.quantity}` : ''}
           </div>
+          ${dateInfo}
           ${includedItemsHtml}
-          <button class="add-to-cart-btn" data-action="add-ticket" data-ticket-id="${ticket.id}" data-ticket-name="${ticket.name}" data-ticket-price="${ticket.price}" data-ticket-dynamic-price="${ticket.dynamicPrice || ticket.price}" data-ticket-category="${ticket.category}" ${soldOut}>
+          <button class="add-to-cart-btn" data-action="add-ticket" data-ticket-id="${ticket.id}" data-ticket-name="${ticket.name}" data-ticket-price="${ticket.price}" data-ticket-dynamic-price="${ticket.dynamicPrice || ticket.price}" data-ticket-category="${ticket.category}" data-available-date="${ticket.availableDate || ''}" ${soldOut}>
             🎫 Add to Cart
           </button>
         </div>
@@ -1150,6 +1166,18 @@ document.addEventListener("DOMContentLoaded", () => {
               const soldOut = ticket.soldOut ? 'disabled' : '';
               const soldOutText = ticket.soldOut ? ' (Sold Out)' : '';
               
+              // Show available date for free tickets in events
+              let dateInfo = '';
+              if (ticket.category === 'free' && ticket.availableDate) {
+                const date = new Date(ticket.availableDate);
+                const formattedDate = date.toLocaleDateString('en-US', { 
+                  year: 'numeric', 
+                  month: 'long', 
+                  day: 'numeric' 
+                });
+                dateInfo = `<div style="color: #28a745; font-size: 0.7rem; margin-bottom: 4px;">📅 Available Date: ${formattedDate}</div>`;
+              }
+              
               let includedItemsHtml = '';
               if (ticket.includesMenuItem && ticket.includedMenuItems && ticket.includedMenuItems.length > 0) {
                 includedItemsHtml = `
@@ -1177,8 +1205,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     Max per person: ${ticket.maxPerPerson}
                     ${ticket.quantity !== null ? ` | Available: ${ticket.quantity}` : ''}
                   </div>
+                  ${dateInfo}
                   ${includedItemsHtml}
-                  <button class="add-to-cart-btn" style="font-size: 0.8rem; padding: 4px 8px;" data-action="add-ticket" data-ticket-id="${ticket.id}" data-ticket-name="${ticket.name}" data-ticket-price="${ticket.price}" data-ticket-dynamic-price="${ticket.dynamicPrice || ticket.price}" data-ticket-category="${ticket.category}" data-event-date="${event.availableDate}" ${soldOut}>
+                  <button class="add-to-cart-btn" style="font-size: 0.8rem; padding: 4px 8px;" data-action="add-ticket" data-ticket-id="${ticket.id}" data-ticket-name="${ticket.name}" data-ticket-price="${ticket.price}" data-ticket-dynamic-price="${ticket.dynamicPrice || ticket.price}" data-ticket-category="${ticket.category}" data-event-date="${event.availableDate}" data-available-date="${ticket.availableDate || ''}" ${soldOut}>
                     🎫 Add to Cart
                   </button>
                 </div>
@@ -1467,8 +1496,21 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     }
     if (returnToLoginBtn) {
-      returnToLoginBtn.addEventListener("click", () => window.location.href = "/");
+      // Remove any existing listeners first
+      returnToLoginBtn.replaceWith(returnToLoginBtn.cloneNode(true));
+      const newReturnToLoginBtn = document.getElementById('returnToLoginBtn');
+      
+      newReturnToLoginBtn.addEventListener("click", () => window.location.href = "/test-auth.html", true);
       console.log('✅ returnToLoginBtn listener attached');
+      
+      // Add immediate click test with capture
+      newReturnToLoginBtn.addEventListener("click", (e) => {
+        console.log('🎯 Raw click detected on returnToLoginBtn!', e);
+        newReturnToLoginBtn.style.backgroundColor = 'red';
+        setTimeout(() => {
+          newReturnToLoginBtn.style.backgroundColor = '';
+        }, 500);
+      }, true);
     }
 
     // Email input change

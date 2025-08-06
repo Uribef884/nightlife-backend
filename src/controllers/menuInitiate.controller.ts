@@ -8,6 +8,8 @@ import { differenceInMinutes } from "date-fns";
 import { AuthenticatedRequest } from "../types/express";
 import { issueMockTransaction } from "../services/mockWompiService";
 import { sanitizeInput } from "../utils/sanitizeInput";
+import { calculatePlatformFee, calculateGatewayFees } from "../utils/menuFeeUtils";
+import { getMenuCommissionRate } from "../config/fees";
 
 // 🍊 POST /menu/initiate
 export const initiateMenuCheckout = async (req: Request, res: Response) => {
@@ -61,6 +63,9 @@ export const initiateMenuCheckout = async (req: Request, res: Response) => {
   }
 
   let total = 0;
+  let totalPaid = 0;
+  let totalClubReceives = 0;
+  let totalPlatformReceives = 0;
 
   for (const item of cartItems) {
     const club = item.menuItem.club;
@@ -97,7 +102,7 @@ export const initiateMenuCheckout = async (req: Request, res: Response) => {
         dynamicPrice = computeDynamicPrice({
           basePrice,
           clubOpenDays: club.openDays,
-          openHours: Array.isArray(club.openHours) && club.openHours.length > 0 ? club.openHours[0].open + '-' + club.openHours[0].close : "",
+          openHours: club.openHours, // Pass the array directly, not a string
         });
       }
     } else {
@@ -106,13 +111,34 @@ export const initiateMenuCheckout = async (req: Request, res: Response) => {
         dynamicPrice = computeDynamicPrice({
           basePrice,
           clubOpenDays: club.openDays,
-          openHours: Array.isArray(club.openHours) && club.openHours.length > 0 ? club.openHours[0].open + '-' + club.openHours[0].close : "",
+          openHours: club.openHours, // Pass the array directly, not a string
         });
       }
     }
     
-    total += dynamicPrice * item.quantity;
+    // Calculate platform fees per item (matching checkout logic exactly)
+    const platformFee = calculatePlatformFee(dynamicPrice, getMenuCommissionRate());
+    const quantity = item.quantity;
+    
+    // Add to transaction totals (matching checkout logic exactly)
+    total += dynamicPrice * quantity;
+    totalPaid += (dynamicPrice + platformFee) * quantity;
+    totalClubReceives += dynamicPrice * quantity;
+    totalPlatformReceives += platformFee * quantity;
   }
+
+  // Calculate gateway fees on the total amount (matching checkout logic exactly)
+  const { totalGatewayFee, iva } = calculateGatewayFees(totalPaid);
+  const finalTotal = totalPaid + totalGatewayFee + iva;
+
+  console.log(`🍽️ [MENU-INITIATE] CALCULATION DEBUG:`);
+  console.log(`   Total Paid (before gateway): ${totalPaid}`);
+  console.log(`   Total Club Receives: ${totalClubReceives}`);
+  console.log(`   Total Platform Receives: ${totalPlatformReceives}`);
+  console.log(`   Gateway Fee: ${totalGatewayFee}`);
+  console.log(`   Gateway IVA: ${iva}`);
+  console.log(`   Final Total: ${finalTotal}`);
+  console.log(`   ========================================`);
 
   const reference = issueMockTransaction();
 
@@ -120,7 +146,7 @@ export const initiateMenuCheckout = async (req: Request, res: Response) => {
   return res.json({
     success: true,
     transactionId: reference,
-    total: total,
+    total: finalTotal,
     message: "Menu checkout initiated successfully"
   });
 };

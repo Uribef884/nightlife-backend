@@ -52,7 +52,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
     }
 
     // Check if event has passed grace period for event tickets
-    if (ticket.category === "event" && ticket.dynamicPricingEnabled) {
+    if (ticket.category === "event") {
       let eventDate: Date;
       let eventOpenHours: { open: string, close: string } | undefined;
 
@@ -66,7 +66,7 @@ export const addToCart = async (req: AuthenticatedRequest, res: Response): Promi
         return;
       }
 
-      // Check if event has passed grace period
+      // Check if event has passed grace period (regardless of dynamic pricing setting)
       const dynamicPrice = computeDynamicEventPrice(Number(ticket.price), eventDate, eventOpenHours);
       if (dynamicPrice === -1) {
         res.status(400).json({ 
@@ -350,6 +350,25 @@ export const getCartItems = async (req: AuthenticatedRequest, res: Response): Pr
             useDateBasedLogic: false,
           });
         }
+      } else if (ticket.category === "event") {
+        // Grace period check for event tickets when dynamic pricing is disabled
+        if (ticket.availableDate) {
+          let eventDate: Date;
+          if (typeof ticket.availableDate === "string") {
+            const [year, month, day] = (ticket.availableDate as string).split("-").map(Number);
+            eventDate = new Date(year, month - 1, day);
+          } else {
+            eventDate = new Date(ticket.availableDate);
+          }
+
+          const gracePeriodCheck = computeDynamicEventPrice(Number(ticket.price), eventDate, ticket.event?.openHours);
+          if (gracePeriodCheck === -1) {
+            dynamicPrice = 0; // Set to 0 to indicate unavailable
+          } else if (gracePeriodCheck > basePrice) {
+            // If grace period price is higher than base price, use grace period price
+            dynamicPrice = gracePeriodCheck;
+          }
+        }
       }
 
       // Add dynamic price to the ticket object
@@ -424,6 +443,25 @@ export const getCartSummary = async (req: AuthenticatedRequest, res: Response): 
             availableDate: new Date(item.date),
             useDateBasedLogic: false,
           });
+        }
+      } else if (ticket.category === "event") {
+        // Grace period check for event tickets when dynamic pricing is disabled
+        if (ticket.availableDate) {
+          let eventDate: Date;
+          if (typeof ticket.availableDate === "string") {
+            const [year, month, day] = (ticket.availableDate as string).split("-").map(Number);
+            eventDate = new Date(year, month - 1, day);
+          } else {
+            eventDate = new Date(ticket.availableDate);
+          }
+
+          const gracePeriodCheck = computeDynamicEventPrice(Number(ticket.price), eventDate, ticket.event?.openHours);
+          if (gracePeriodCheck === -1) {
+            dynamicPrice = 0; // Set to 0 to indicate unavailable
+          } else if (gracePeriodCheck > basePrice) {
+            // If grace period price is higher than base price, use grace period price
+            dynamicPrice = gracePeriodCheck;
+          }
         }
       }
 

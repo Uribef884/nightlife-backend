@@ -293,10 +293,10 @@ async function showClubDetail(clubId) {
       fetch(eventsUrl),
     ]);
     const club = await clubRes.json();
-    const tickets = await ticketsRes.json();
+    const ticketsData = await ticketsRes.json();
     const menu = await menuRes.json();
     const events = await eventsRes.json();
-    renderClubDetail(club, tickets, menu, events);
+    renderClubDetail(club, ticketsData.tickets || ticketsData, menu, events);
   } catch (err) {
     loadingEl.textContent = 'Failed to load club details.';
   }

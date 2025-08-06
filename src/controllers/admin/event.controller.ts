@@ -96,10 +96,27 @@ export const createEventAdmin = async (req: AuthenticatedRequest, res: Response)
       return;
     }
 
+    // 🔒 Check if event already exists for this date and club
+    const eventRepo = AppDataSource.getRepository(Event);
+    const existingEvent = await eventRepo.findOne({
+      where: { 
+        clubId: clubId, 
+        availableDate: normalizedDate,
+        isActive: true,
+        isDeleted: false
+      }
+    });
+
+    if (existingEvent) {
+      res.status(400).json({ 
+        error: `An event already exists for ${normalizedDate.toISOString().split('T')[0]}. Only one event per date is allowed.` 
+      });
+      return;
+    }
+
     // Process image
     const processed = await (await import("../../services/imageService")).ImageService.processImage(req.file.buffer);
 
-    const eventRepo = AppDataSource.getRepository(Event);
     const newEvent = eventRepo.create({
       name: name.trim(),
       description: description?.trim() || null,
