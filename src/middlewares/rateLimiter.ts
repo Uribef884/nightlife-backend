@@ -45,3 +45,9 @@ export const qrValidationLimiter = rateLimit({
   legacyHeaders: false,
   message: "Too many QR validation requests, please try again later.",
 });
+
+export const webhookRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,              // max 10 requests per minute
+  message: 'Too many requests',
+});

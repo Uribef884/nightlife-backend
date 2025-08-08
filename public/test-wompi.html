@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wompi Integration Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .form-group {
+            margin: 10px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            white-space: pre-wrap;
+        }
+        .success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>Wompi Integration Test</h1>
+    
+    <div class="section">
+        <h2>Ticket Checkout Test</h2>
+        <form id="ticketForm">
+            <div class="form-group">
+                <label for="ticketEmail">Email:</label>
+                <input type="email" id="ticketEmail" value="test@example.com" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="ticketPaymentMethod">Payment Method:</label>
+                <select id="ticketPaymentMethod">
+                    <option value="CARD">Credit/Debit Card</option>
+                    <option value="NEQUI">Nequi</option>
+                    <option value="DAVIPLATA">Daviplata</option>
+                    <option value="BANCOLOMBIA_TRANSFER">Bancolombia Transfer</option>
+                    <option value="PSE">PSE</option>
+                </select>
+            </div>
+            
+            <div id="cardFields" class="form-group">
+                <label for="cardNumber">Card Number:</label>
+                <input type="text" id="cardNumber" value="4242424242424242" placeholder="4242424242424242">
+                
+                <label for="cardExpMonth">Exp Month:</label>
+                <input type="text" id="cardExpMonth" value="12" placeholder="12">
+                
+                <label for="cardExpYear">Exp Year:</label>
+                <input type="text" id="cardExpYear" value="2025" placeholder="2025">
+                
+                <label for="cardCvc">CVC:</label>
+                <input type="text" id="cardCvc" value="123" placeholder="123">
+                
+                <label for="cardHolder">Card Holder:</label>
+                <input type="text" id="cardHolder" value="John Doe" placeholder="John Doe">
+                
+                <label for="installments">Installments:</label>
+                <input type="number" id="installments" value="1" min="1" max="12">
+            </div>
+            
+            <div id="phoneFields" class="form-group" style="display: none;">
+                <label for="phoneNumber">Phone Number:</label>
+                <input type="text" id="phoneNumber" value="3107654321" placeholder="3107654321">
+            </div>
+            
+            <div id="pseFields" class="form-group" style="display: none;">
+                <label for="userType">User Type:</label>
+                <select id="userType">
+                    <option value="PERSONAL">Personal</option>
+                    <option value="BUSINESS">Business</option>
+                </select>
+                
+                <label for="legalIdType">Legal ID Type:</label>
+                <select id="legalIdType">
+                    <option value="CC">CC</option>
+                    <option value="CE">CE</option>
+                    <option value="NIT">NIT</option>
+                </select>
+                
+                <label for="legalId">Legal ID:</label>
+                <input type="text" id="legalId" value="1234567890" placeholder="1234567890">
+                
+                <label for="financialInstitution">Financial Institution Code:</label>
+                <input type="text" id="financialInstitution" value="1007" placeholder="1007">
+                
+                <label for="paymentDescription">Payment Description:</label>
+                <input type="text" id="paymentDescription" value="Payment for tickets" placeholder="Payment for tickets">
+            </div>
+            
+            <button type="button" onclick="initiateTicketCheckout()">Initiate Ticket Checkout</button>
+            <button type="button" onclick="confirmTicketCheckout()">Confirm Ticket Checkout</button>
+        </form>
+        
+        <div id="ticketResult" class="result"></div>
+    </div>
+    
+    <div class="section">
+        <h2>Menu Checkout Test</h2>
+        <form id="menuForm">
+            <div class="form-group">
+                <label for="menuEmail">Email:</label>
+                <input type="email" id="menuEmail" value="test@example.com" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="menuPaymentMethod">Payment Method:</label>
+                <select id="menuPaymentMethod">
+                    <option value="CARD">Credit/Debit Card</option>
+                    <option value="NEQUI">Nequi</option>
+                    <option value="DAVIPLATA">Daviplata</option>
+                    <option value="BANCOLOMBIA_TRANSFER">Bancolombia Transfer</option>
+                    <option value="PSE">PSE</option>
+                </select>
+            </div>
+            
+            <button type="button" onclick="initiateMenuCheckout()">Initiate Menu Checkout</button>
+            <button type="button" onclick="confirmMenuCheckout()">Confirm Menu Checkout</button>
+        </form>
+        
+        <div id="menuResult" class="result"></div>
+    </div>
+
+    <script>
+        let currentTransactionId = null;
+        
+        // Show/hide fields based on payment method
+        function updateFields(type, formId) {
+            const cardFields = document.getElementById(formId === 'ticket' ? 'cardFields' : 'cardFields');
+            const phoneFields = document.getElementById(formId === 'ticket' ? 'phoneFields' : 'phoneFields');
+            const pseFields = document.getElementById(formId === 'ticket' ? 'pseFields' : 'pseFields');
+            
+            cardFields.style.display = type === 'CARD' ? 'block' : 'none';
+            phoneFields.style.display = ['NEQUI', 'DAVIPLATA', 'BANCOLOMBIA_TRANSFER'].includes(type) ? 'block' : 'none';
+            pseFields.style.display = type === 'PSE' ? 'block' : 'none';
+        }
+        
+        document.getElementById('ticketPaymentMethod').addEventListener('change', (e) => {
+            updateFields(e.target.value, 'ticket');
+        });
+        
+        document.getElementById('menuPaymentMethod').addEventListener('change', (e) => {
+            updateFields(e.target.value, 'menu');
+        });
+        
+        function showResult(elementId, data, isError = false) {
+            const element = document.getElementById(elementId);
+            element.textContent = JSON.stringify(data, null, 2);
+            element.className = `result ${isError ? 'error' : 'success'}`;
+        }
+        
+        async function initiateTicketCheckout() {
+            const paymentMethod = document.getElementById('ticketPaymentMethod').value;
+            const email = document.getElementById('ticketEmail').value;
+            
+            let paymentData = {};
+            
+            if (paymentMethod === 'CARD') {
+                paymentData = {
+                    number: document.getElementById('cardNumber').value,
+                    exp_month: document.getElementById('cardExpMonth').value,
+                    exp_year: document.getElementById('cardExpYear').value,
+                    cvc: document.getElementById('cardCvc').value,
+                    card_holder: document.getElementById('cardHolder').value,
+                    installments: parseInt(document.getElementById('installments').value)
+                };
+            } else if (['NEQUI', 'DAVIPLATA', 'BANCOLOMBIA_TRANSFER'].includes(paymentMethod)) {
+                paymentData = {
+                    phone_number: document.getElementById('phoneNumber').value
+                };
+            } else if (paymentMethod === 'PSE') {
+                paymentData = {
+                    user_type: document.getElementById('userType').value,
+                    user_legal_id_type: document.getElementById('legalIdType').value,
+                    user_legal_id: document.getElementById('legalId').value,
+                    financial_institution_code: document.getElementById('financialInstitution').value,
+                    payment_description: document.getElementById('paymentDescription').value
+                };
+            }
+            
+            try {
+                const response = await fetch('/wompi/tickets/initiate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email,
+                        paymentMethod,
+                        paymentData
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentTransactionId = data.transactionId;
+                    showResult('ticketResult', data);
+                    
+                    if (data.redirectUrl) {
+                        alert(`Redirect to: ${data.redirectUrl}`);
+                    }
+                } else {
+                    showResult('ticketResult', data, true);
+                }
+            } catch (error) {
+                showResult('ticketResult', { error: error.message }, true);
+            }
+        }
+        
+        async function confirmTicketCheckout() {
+            if (!currentTransactionId) {
+                showResult('ticketResult', { error: 'No transaction ID available. Please initiate checkout first.' }, true);
+                return;
+            }
+            
+            try {
+                const response = await fetch('/wompi/tickets/checkout/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        transactionId: currentTransactionId
+                    })
+                });
+                
+                const data = await response.json();
+                showResult('ticketResult', data, data.error);
+            } catch (error) {
+                showResult('ticketResult', { error: error.message }, true);
+            }
+        }
+        
+        async function initiateMenuCheckout() {
+            const paymentMethod = document.getElementById('menuPaymentMethod').value;
+            const email = document.getElementById('menuEmail').value;
+            
+            let paymentData = {};
+            
+            if (paymentMethod === 'CARD') {
+                paymentData = {
+                    number: document.getElementById('cardNumber').value,
+                    exp_month: document.getElementById('cardExpMonth').value,
+                    exp_year: document.getElementById('cardExpYear').value,
+                    cvc: document.getElementById('cardCvc').value,
+                    card_holder: document.getElementById('cardHolder').value,
+                    installments: parseInt(document.getElementById('installments').value)
+                };
+            } else if (['NEQUI', 'DAVIPLATA', 'BANCOLOMBIA_TRANSFER'].includes(paymentMethod)) {
+                paymentData = {
+                    phone_number: document.getElementById('phoneNumber').value
+                };
+            } else if (paymentMethod === 'PSE') {
+                paymentData = {
+                    user_type: document.getElementById('userType').value,
+                    user_legal_id_type: document.getElementById('legalIdType').value,
+                    user_legal_id: document.getElementById('legalId').value,
+                    financial_institution_code: document.getElementById('financialInstitution').value,
+                    payment_description: document.getElementById('paymentDescription').value
+                };
+            }
+            
+            try {
+                const response = await fetch('/wompi/menu/initiate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email,
+                        paymentMethod,
+                        paymentData
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentTransactionId = data.transactionId;
+                    showResult('menuResult', data);
+                    
+                    if (data.redirectUrl) {
+                        alert(`Redirect to: ${data.redirectUrl}`);
+                    }
+                } else {
+                    showResult('menuResult', data, true);
+                }
+            } catch (error) {
+                showResult('menuResult', { error: error.message }, true);
+            }
+        }
+        
+        async function confirmMenuCheckout() {
+            if (!currentTransactionId) {
+                showResult('menuResult', { error: 'No transaction ID available. Please initiate checkout first.' }, true);
+                return;
+            }
+            
+            try {
+                const response = await fetch('/wompi/menu/checkout/confirm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        transactionId: currentTransactionId
+                    })
+                });
+                
+                const data = await response.json();
+                showResult('menuResult', data, data.error);
+            } catch (error) {
+                showResult('menuResult', { error: error.message }, true);
+            }
+        }
+        
+        // Initialize fields
+        updateFields('CARD', 'ticket');
+        updateFields('CARD', 'menu');
+    </script>
+</body>
+</html> 

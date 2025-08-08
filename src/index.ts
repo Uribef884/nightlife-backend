@@ -30,6 +30,14 @@ import fileUploadRoutes from "./routes/fileUpload.routes";
 import adRoutes from "./routes/ads.routes";
 import adminRoutes from "./routes/admin";
 
+
+// Wompi Integration Routes
+import ticketInitiateWompiRoutes from "./routes/ticketInitiateWompi.routes";
+import ticketCheckoutWompiRoutes from "./routes/ticketCheckoutWompi.routes";
+import menuInitiateWompiRoutes from "./routes/menuInitiateWompi.routes";
+import menuCheckoutWompiRoutes from "./routes/menuCheckoutWompi.routes";
+import webhookRoutes from './routes/webhook.routes';
+
 dotenv.config();
 
 const app = express();
@@ -90,6 +98,13 @@ app.use("/validate/menu-from-ticket", menuFromTicketQRRoutes);
 
 // Ticket Menu Management
 app.use("/ticket-menu", ticketIncludedMenuRoutes);
+
+// Wompi Integration Routes
+app.use("/wompi/tickets/initiate", ticketInitiateWompiRoutes);
+app.use("/wompi/tickets/checkout", ticketCheckoutWompiRoutes);
+app.use("/wompi/menu/initiate", menuInitiateWompiRoutes);
+app.use("/wompi/menu/checkout", menuCheckoutWompiRoutes);
+app.use('/api/webhook', webhookRoutes);
 
 // Admin Routes
 app.use("/admin", adminRoutes);
